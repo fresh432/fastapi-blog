@@ -1,0 +1,17 @@
+"""
+FastAPI 博客系统 - ORM 模型
+"""
+
+from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy.sql import func
+from app.database import Base
+
+class Article(Base):
+    """文章表"""
+    __tablename__ = "articles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(100), nullable=False)
+    content = Column(Text, nullable=False)
+    author = Column(String(50), default="匿名")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
