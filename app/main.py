@@ -6,8 +6,9 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import engine, Base, get_db, SessionLocal
 from app.models_Article import Article
+from app.models_User import User
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 
 # 建表
@@ -41,6 +42,18 @@ class ArticleResponse(BaseModel):
     class Config:
         from_attributes = True  # 允许从 ORM 对象转换
 
+class UserCreate(BaseModel):
+    """用户注册/登录请求"""
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6, max_length=100)
+
+class UserResponse(BaseModel):
+    """用户响应"""
+    id: int
+    username: str
+
+    class Config:
+        from_attributes = True
 
 # ========== 基础路由 ==========
 
@@ -90,6 +103,67 @@ def delete_article(article_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "删除成功"}
 
+# ========== 新增：更新文章 ==========
+
+class ArticleUpdate(BaseModel):
+    """更新文章请求体模型(所有字段可选)"""
+    title: Optional[str] = Field(None, min_length=1, max_length=100)
+    content: Optional[str] = Field(None, min_length=1)
+    author: Optional[str] = None
+
+@app.put("/articles/{article_id}", response_model=ArticleResponse)
+def update_article(
+        article_id: int,
+        article_update: ArticleUpdate,
+        db: Session = Depends(get_db)
+):
+    """更新文章(部分更新)"""
+    # 1. 查询文章
+    db_article = db.query(Article).filter(Article.id == article_id).first()
+
+    # 2. 不存在则报错
+    if not db_article:
+        raise HTTPException(status_code=404, detail="文章不存在")
+
+    # 3. 只更新传入的字段
+    update_data = article_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_article, key, value)
+
+    # 4. 提交并返回
+    db.commit()
+    db.refresh(db_article)
+    return db_article
+
+# ========== 用户注册/登录 ==========
+
+@app.post("/register", response_model=UserResponse, status_code=201)
+def register(user: UserCreate, db: Session = Depends(get_db)):
+    """用户注册"""
+    # 检查用户名是否已存在
+    existing = db.query(User).filter(User.username == user.username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="用户名已存在")
+
+    # 创建用户 (明文密码, 仅学习用)
+    db_user = User(username=user.username, password=user.password)
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+@app.post("/login")
+def login(user: UserCreate, db: Session = Depends(get_db)):
+    """用户登录 (简化版)"""
+    db_user = db.query(User).filter(
+        User.username == user.username,
+        User.password == user.password
+    ).first()
+
+    if not db_user:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    return {"message": "登录成功", "user_id": db_user.id}
 
 # ========== 启动时添加测试数据 ==========
 

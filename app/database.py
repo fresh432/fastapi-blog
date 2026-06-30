@@ -7,6 +7,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 # SQLite 数据库 (本地文件)
+
 SQLALCHEMY_DATABASE_URL = "sqlite:///./blog.db"
 
 engine = create_engine(
