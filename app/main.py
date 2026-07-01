@@ -10,6 +10,7 @@ from app.models_User import User
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
+from app.auth import verify_password, get_password_hash
 
 # 建表
 Base.metadata.create_all(bind=engine)
@@ -103,8 +104,6 @@ def delete_article(article_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "删除成功"}
 
-# ========== 新增：更新文章 ==========
-
 class ArticleUpdate(BaseModel):
     """更新文章请求体模型(所有字段可选)"""
     title: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -139,14 +138,17 @@ def update_article(
 
 @app.post("/register", response_model=UserResponse, status_code=201)
 def register(user: UserCreate, db: Session = Depends(get_db)):
-    """用户注册"""
+    """用户注册 (密码加密存储)"""
     # 检查用户名是否已存在
     existing = db.query(User).filter(User.username == user.username).first()
     if existing:
         raise HTTPException(status_code=400, detail="用户名已存在")
 
-    # 创建用户 (明文密码, 仅学习用)
-    db_user = User(username=user.username, password=user.password)
+    # 加密密码
+    hashed_password = get_password_hash(user.password)
+
+    # 创建用户
+    db_user = User(username=user.username, password=hashed_password)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
@@ -154,13 +156,14 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/login")
 def login(user: UserCreate, db: Session = Depends(get_db)):
-    """用户登录 (简化版)"""
-    db_user = db.query(User).filter(
-        User.username == user.username,
-        User.password == user.password
-    ).first()
+    """用户登录 (密码验证)"""
+    db_user = db.query(User).filter(User.username == user.username).first()
 
     if not db_user:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    # 验证密码
+    if not verify_password(user.password, db_user.password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     return {"message": "登录成功", "user_id": db_user.id}
