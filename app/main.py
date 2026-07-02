@@ -10,7 +10,11 @@ from app.models_User import User
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
-from app.auth import verify_password, get_password_hash
+from app.auth import verify_password, get_password_hash, create_access_token, decode_token
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm, oauth2
+
+# OAuth2密码流, token获取地址
+oauth2_schem = OAuth2PasswordBearer(tokenUrl="token")
 
 # 建表
 Base.metadata.create_all(bind=engine)
@@ -62,16 +66,35 @@ class UserResponse(BaseModel):
 def read_root():
     return {"message": "个人博客系统", "docs": "/docs"}
 
+def get_current_user(token: str = Depends(oauth2_schem), db: Session = Depends(get_db)):
+    """依赖项: 验证Token并返回当前用户"""
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="无效的Token")
+
+    username = payload.get("sub")
+    if not username:
+        raise HTTPException(status_code=401, detail="Token中无用户信息")
+
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    return user
 
 # ========== 文章 CRUD（数据库版）==========
 
 @app.post("/articles", response_model=ArticleResponse, status_code=201)
-def create_article(article: ArticleCreate, db: Session = Depends(get_db)):
-    """创建文章"""
+def create_article(
+    article: ArticleCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """创建文章 (需要登录)"""
     db_article = Article(
         title=article.title,
         content=article.content,
-        author=article.author
+        author=current_user.username
     )
     db.add(db_article)
     db.commit()
@@ -136,6 +159,34 @@ def update_article(
 
 # ========== 用户注册/登录 ==========
 
+@app.post("/token")
+def login_for_access_token(
+        from_data: OAuth2PasswordRequestForm = Depends(),
+        db: Session = Depends(get_db)
+):
+    """
+    OAuth2标准登录, 返回JWT Token
+    请求格式: x-www-from-urlencoded (username + password)
+    """
+    # 查找用户
+    user = db.query(User).filter(User.username == from_data.username).first()
+
+    # 验证用户和密码
+    if not user or not verify_password(from_data.password, user.password):
+        raise HTTPException(
+            status_code=401,
+            detail="用户名或密码错误",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # 创建Token
+    access_token = create_access_token(data={"sub": user.username})
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
+
 @app.post("/register", response_model=UserResponse, status_code=201)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     """用户注册 (密码加密存储)"""
@@ -156,17 +207,27 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/login")
 def login(user: UserCreate, db: Session = Depends(get_db)):
-    """用户登录 (密码验证)"""
+    """用户登录 (JSON格式, 兼容旧接口)"""
     db_user = db.query(User).filter(User.username == user.username).first()
 
-    if not db_user:
+    if not db_user or not verify_password(user.password, db_user.password):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    # 验证密码
-    if not verify_password(user.password, db_user.password):
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    access_token = create_access_token(data={"sub": db_user.username})
 
-    return {"message": "登录成功", "user_id": db_user.id}
+    return {"message": "登录成功",
+            "user_id": db_user.id,
+            "token_type": "bearer"
+    }
+
+@app.get("/users/me")
+def read_users_me(current_user: User = Depends(get_current_user)):
+    """获取当前登录用户信息 (需要Token)"""
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "created_at": current_user.created_at
+    }
 
 # ========== 启动时添加测试数据 ==========
 
