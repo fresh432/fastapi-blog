@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import engine, Base, get_db, SessionLocal
 from app.models_Article import Article
 from app.models_User import User
+from app.models_Category import Category
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
@@ -33,7 +34,7 @@ class ArticleCreate(BaseModel):
     """创建文章请求模型"""
     title: str = Field(..., min_length=1, max_length=100, description="文章标题")
     content: str = Field(..., min_length=1, description="文章内容")
-    author: str = "匿名"
+    category_id: Optional[int] = None # 新增: 可选分类
 
 
 class ArticleResponse(BaseModel):
@@ -42,6 +43,7 @@ class ArticleResponse(BaseModel):
     title: str
     content: str
     author: str
+    category_id: Optional[int] = None
     created_at: datetime
 
     class Config:
@@ -56,6 +58,16 @@ class UserResponse(BaseModel):
     """用户响应"""
     id: int
     username: str
+
+    class Config:
+        from_attributes = True
+
+class CategoryCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=50)
+
+class CategoryResponse(BaseModel):
+    id: int
+    name: str
 
     class Config:
         from_attributes = True
@@ -90,11 +102,18 @@ def create_article(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """创建文章 (需要登录)"""
+    """创建文章 (可选分类)"""
+    # 如果有分类ID, 验证分类是否存在
+    if article.category_id:
+        category = db.query(Category).filter(Category.id == article.category_id).first()
+        if not category:
+            raise HTTPException(satus_code=404, detail="分类不存在")
+
     db_article = Article(
         title=article.title,
         content=article.content,
-        author=current_user.username
+        author=current_user.username,
+        category_id=article.category_id # 新增
     )
     db.add(db_article)
     db.commit()
@@ -131,6 +150,7 @@ class ArticleUpdate(BaseModel):
     """更新文章请求体模型(所有字段可选)"""
     title: Optional[str] = Field(None, min_length=1, max_length=100)
     content: Optional[str] = Field(None, min_length=1)
+    category_id: Optional[int] = None
     author: Optional[str] = None
 
 @app.put("/articles/{article_id}", response_model=ArticleResponse)
@@ -156,6 +176,37 @@ def update_article(
     db.commit()
     db.refresh(db_article)
     return db_article
+
+# ========== 文章类别 ==========
+
+# 创建分类
+@app.post("/categories", response_model=CategoryResponse, status_code=201)
+def create_category(category: CategoryCreate, db: Session = Depends(get_db)):
+    db_category = Category(name=category.name)
+    db.add(db_category)
+    db.commit()
+    db.refresh(db_category)
+    return db_category
+
+# 获取所有分类
+@app.get("/categories", response_model=List[CategoryResponse])
+def list_categories(db: Session = Depends(get_db)):
+    return db.query(Category).all()
+
+# 获取某个分类下的所有文章
+@app.get("/categories/{category_id}/articles")
+def get_category_articles(category_id: int, db: Session = Depends(get_db)):
+    """获取分类下的所有文章"""
+    category = db.query(Category).filter(Category.id == category_id).first()
+    if not category:
+        raise  HTTPException(status_code=404, detail="分类不存在")
+
+    # 查询该分类下的文章
+    articles = db.query(Article).filter(Article.category_id == category_id).all()
+    return {
+        "category": category.name,
+        "articles": articles
+    }
 
 # ========== 用户注册/登录 ==========
 
@@ -215,7 +266,7 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
 
     access_token = create_access_token(data={"sub": db_user.username})
 
-    return {"message": "登录成功",
+    return {"access_token": access_token,
             "user_id": db_user.id,
             "token_type": "bearer"
     }

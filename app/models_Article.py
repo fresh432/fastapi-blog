@@ -2,7 +2,7 @@
 FastAPI 博客系统 - ORM 模型
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -14,4 +14,5 @@ class Article(Base):
     title = Column(String(100), nullable=False)
     content = Column(Text, nullable=False)
     author = Column(String(50), default="匿名")
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
