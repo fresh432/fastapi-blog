@@ -44,6 +44,7 @@ class ArticleResponse(BaseModel):
     content: str
     author: str
     category_id: Optional[int] = None
+    category_name: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -68,6 +69,7 @@ class CategoryCreate(BaseModel):
 class CategoryResponse(BaseModel):
     id: int
     name: str
+    articles_count: int = 0
 
     class Config:
         from_attributes = True
@@ -133,7 +135,25 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
     article = db.query(Article).filter(Article.id == article_id).first()
     if not article:
         raise HTTPException(status_code=404, detail="文章不存在")
-    return article
+
+    # 构建响应, 填充分类名称
+    response = ArticleResponse(
+
+        id=article.id,
+        title=article.title,
+        content=article.content,
+        author=article.author,
+        category_id=article.category_id,
+        created_at=article.created_at
+    )
+
+    # 如果有分类, 查询名称
+    if article.category_id:
+        category = db.query(Category).filter(Category.id == article.category_id).first()
+        if category:
+            response.category_name = category.name
+
+    return response
 
 
 @app.delete("/articles/{article_id}")
@@ -157,9 +177,10 @@ class ArticleUpdate(BaseModel):
 def update_article(
         article_id: int,
         article_update: ArticleUpdate,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
 ):
-    """更新文章(部分更新)"""
+    """更新文章(支持修改分类)"""
     # 1. 查询文章
     db_article = db.query(Article).filter(Article.id == article_id).first()
 
@@ -169,6 +190,12 @@ def update_article(
 
     # 3. 只更新传入的字段
     update_data = article_update.model_dump(exclude_unset=True)
+    # 如果修改了分类, 验证分类是否存在
+    if "category_id" in update_data and update_data["category_id"] is not None:
+        category = db.query(Category).filter(Category.id == update_data["category_id"]).first()
+        if not category:
+            raise HTTPException(status_code=404, detail="分类不存在")
+
     for key, value in update_data.items():
         setattr(db_article, key, value)
 
@@ -191,7 +218,22 @@ def create_category(category: CategoryCreate, db: Session = Depends(get_db)):
 # 获取所有分类
 @app.get("/categories", response_model=List[CategoryResponse])
 def list_categories(db: Session = Depends(get_db)):
-    return db.query(Category).all()
+    """获取所有分类 (含文章数量)"""
+    categories = db.query(Category).all()
+
+    result = []
+    for category in categories:
+        # 统计该分类下的文章数量
+        count = db.query(Article).filter(Article.category_id == category.id).count()
+
+        cat_response = CategoryResponse(
+            id=category.id,
+            name=category.name,
+            articles_count=count
+        )
+        result.append(cat_response)
+
+    return result
 
 # 获取某个分类下的所有文章
 @app.get("/categories/{category_id}/articles")
@@ -207,6 +249,20 @@ def get_category_articles(category_id: int, db: Session = Depends(get_db)):
         "category": category.name,
         "articles": articles
     }
+
+@app.delete("/categories/{category_id}")
+def delete_category(category_id: int, db: Session = Depends(get_db)):
+    """删除分类 (关联文章category_id设为NULL) """
+    category = db.query(Category).filter(Category.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="分类不存在")
+
+    # 将关联文章的category_id设为NULL
+    db.query(Article).filter(Article.category_id == category_id).update({"category_id": None})
+
+    db.delete(category)
+    db.commit()
+    return {"message": "删除成功"}
 
 # ========== 用户注册/登录 ==========
 
