@@ -8,6 +8,7 @@ from app.database import engine, Base, get_db, SessionLocal
 from app.models_Article import Article
 from app.models_User import User
 from app.models_Category import Category
+from app.models_Comment import Comment
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
@@ -45,6 +46,7 @@ class ArticleResponse(BaseModel):
     author: str
     category_id: Optional[int] = None
     category_name: Optional[str] = None
+    comments_count: int = 0
     created_at: datetime
 
     class Config:
@@ -70,6 +72,20 @@ class CategoryResponse(BaseModel):
     id: int
     name: str
     articles_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+class CommentCreate(BaseModel):
+    content: str = Field(..., min_length=1, description="评论内容")
+    article_id: int = Field(..., description="文章ID")
+
+class CommentResponse(BaseModel):
+    id: int
+    content: str
+    author: str
+    article_id: int
+    created_at: datetime
 
     class Config:
         from_attributes = True
@@ -152,6 +168,9 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
         category = db.query(Category).filter(Category.id == article.category_id).first()
         if category:
             response.category_name = category.name
+
+    # 评论数量
+    response.comments_count = db.query(Comment).filter(Comment.article_id == article_id).count()
 
     return response
 
@@ -335,6 +354,49 @@ def read_users_me(current_user: User = Depends(get_current_user)):
         "username": current_user.username,
         "created_at": current_user.created_at
     }
+
+# ========== 评论 CRUD ==========
+
+@app.post("/comments", response_model=CommentResponse, status_code=201)
+def create_comment(
+        comment: CommentCreate,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """创建评论"""
+    # 验证文章存在
+    article = db.query(Article).filter(Article.id == comment.article_id).first()
+    if not article:
+        raise HTTPException(status_code=404, detail="文章不存在")
+
+    db_comment = Comment(
+        content=comment.content,
+        author=current_user.username,
+        article_id=comment.article_id
+    )
+    db.add(db_comment)
+    db.commit()
+    db.refresh(db_comment)
+    return db_comment
+
+@app.delete("/comments/{comment_id}")
+def delete_comment(
+        comment_id: int,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """删除评论 (只能删除自己的) """
+    comment = db.query(Comment).filter(Comment.id == comment_id).first()
+    if not comment:
+        raise HTTPException(status_code=404, detail="评论不存在")
+
+    # 只能删除自己的评论
+    if comment.author != current_user.username:
+        raise HTTPException(status_code=403, detail="无权删除他人评论")
+
+    db.delete(comment)
+    db.commit()
+    return {"message": "删除成功"}
 
 # ========== 启动时添加测试数据 ==========
 

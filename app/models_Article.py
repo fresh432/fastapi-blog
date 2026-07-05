@@ -3,6 +3,7 @@ FastAPI 博客系统 - ORM 模型
 """
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -16,3 +17,6 @@ class Article(Base):
     author = Column(String(50), default="匿名")
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # 关联评论
+    comments = relationship("Comment", back_populates="article", cascade="all, delete-orphan")
