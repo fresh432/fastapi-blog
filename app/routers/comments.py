@@ -6,9 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models_Comment import Comment
-from app.models_Article import Article
-from app.models_User import User
+from app.models import Comment, Article, User
 from app.auth import decode_token
 from fastapi.security import OAuth2PasswordBearer
 

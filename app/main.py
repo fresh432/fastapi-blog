@@ -33,7 +33,7 @@ def read_root():
 # ========== 启动时添加测试数据 ==========
 
 from app.database import SessionLocal
-from app.models_Article import Article
+from app.models import Article
 
 @app.on_event("startup")
 def init_data():

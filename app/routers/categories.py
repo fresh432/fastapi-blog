@@ -7,8 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.database import get_db
-from app.models_Category import Category
-from app.models_Article import Article
+from app.models import Category, Article
 
 router = APIRouter(prefix="/categories", tags=["分类"])
 

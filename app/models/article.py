@@ -1,5 +1,5 @@
 """
-FastAPI 博客系统 - ORM 模型
+文章 ORM 模型
 """
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey

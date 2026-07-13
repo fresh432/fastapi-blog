@@ -9,10 +9,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.database import get_db
-from app.models_Article import Article
-from app.models_Category import Category
-from app.models_Comment import Comment
-from app.models_User import User
+from app.models import Article, Category, Comment, User
 from app.auth import decode_token
 from fastapi.security import OAuth2PasswordBearer
 
