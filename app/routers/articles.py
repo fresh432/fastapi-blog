@@ -2,11 +2,12 @@
 文章路由模块
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 
 from app.database import get_db
 from app.models import Article, Category, Comment, User
@@ -61,6 +62,31 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 # ========== 路由 ==========
+
+@router.get("/search")
+def search_articles(
+        q: str = Query(..., min_length=1, description="搜索关键词"),
+        skip: int = Query(0, ge=0, description="跳过条数"),
+        limit: int = Query(10, ge=1, le=100, description="每页条数"),
+        db: Session = Depends(get_db)
+):
+    """搜索文章 (支持分页)"""
+    query = db.query(Article).filter(
+        or_(
+            Article.title.contains(q),
+            Article.content.contains(q)
+        )
+    )
+
+    total = query.count()
+    articles = query.order_by(Article.created_at.desc()).offset(skip).limit(limit).all()
+
+    return {
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "articles": articles
+    }
 
 @router.post("", response_model=ArticleResponse, status_code=201)
 def create_article(
