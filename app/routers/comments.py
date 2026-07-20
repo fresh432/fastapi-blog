@@ -2,7 +2,7 @@
 评论路由模块
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -95,3 +95,21 @@ def delete_comment(
     db.delete(comment)
     db.commit()
     return {"message": "删除成功"}
+
+@router.get("/article/{article_id}")
+def get_article_comments(
+    article_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """"获取文章评论 (支持分页) """
+    comments = db.query(Comment).filter(Comment.article_id == article_id).offset(skip).limit(limit).all()
+    total = db.query(Comment).filter(Comment.article_id == article_id).count()
+
+    return {
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "comments": comments
+    }

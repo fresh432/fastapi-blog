@@ -38,6 +38,7 @@ class ArticleResponse(BaseModel):
     author: str
     category_id: Optional[int] = None
     category_name: Optional[str] = None
+    tags: List[dict] = []
     comments_count: int = 0
     created_at: datetime
 
@@ -112,15 +113,27 @@ def create_article(
     return db_article
 
 
-@router.get("", response_model=List[ArticleResponse])
-def list_articles(db: Session = Depends(get_db)):
-    """获取所有文章"""
-    return db.query(Article).all()
+@router.get("")
+def list_articles(
+    skip: int = Query(0, ge=0, description="跳过条数"),
+    limit: int = Query(10, ge=1, le=100, description="每条页数"),
+    db: Session = Depends(get_db)
+):
+    """获取文章列表 (支持分页) """
+    articles = db.query(Article).offset(skip).limit(limit).all()
+    total = db.query(Article).count()
+
+    return {
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "articles": articles
+    }
 
 
 @router.get("/{article_id}", response_model=ArticleResponse)
 def get_article(article_id: int, db: Session = Depends(get_db)):
-    """获取单篇文章"""
+    """获取单篇文章 (含标签) """
     article = db.query(Article).filter(Article.id == article_id).first()
     if not article:
         raise HTTPException(status_code=404, detail="文章不存在")
@@ -131,7 +144,9 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
         content=article.content,
         author=article.author,
         category_id=article.category_id,
-        created_at=article.created_at
+        created_at=article.created_at,
+        tags=[{"id": tag.id, "name": tag.name} for tag in article.tags],
+        comments_count=db.query(Comment).filter(Comment.article_id == article_id).count()
     )
 
     if article.category_id:
@@ -139,7 +154,6 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
         if category:
             response.category_name = category.name
 
-    response.comments_count = db.query(Comment).filter(Comment.article_id == article_id).count()
     return response
 
 
