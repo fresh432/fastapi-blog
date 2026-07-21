@@ -2,6 +2,7 @@
 用户路由模块
 """
 
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
@@ -18,7 +19,21 @@ router = APIRouter(tags=["用户"])
 # ========== Pydantic 模型 ==========
 
 from pydantic import BaseModel, Field
+from typing import Optional
 
+class UserUpdate(BaseModel):
+    avatar: Optional[str] = Field(None, max_length=255, description="头像URL")
+    bio: Optional[str] = Field(None, max_length=500, description="个人简介")
+
+class UserProfile(BaseModel):
+    id: int
+    username: str
+    avatar: Optional[str] = None
+    bio: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
@@ -106,11 +121,23 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/users/me")
+@router.get("/users/me", response_model=UserProfile)
 def read_users_me(current_user: User = Depends(get_current_user)):
     """获取当前用户信息"""
-    return {
-        "id": current_user.id,
-        "username": current_user.username,
-        "created_at": current_user.created_at
-    }
+    return current_user
+
+@router.put("/users/me", response_model=UserProfile)
+def update_user_profile(
+    user_update: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """更新当前用户资料"""
+    update_data = user_update.model_dump(exclude_unset=True)
+
+    for key, value in update_data.items():
+        setattr(current_user, key, value)
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user
