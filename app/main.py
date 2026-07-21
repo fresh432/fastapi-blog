@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from app.database import engine, Base
 
 # 导入路由
-from app.routers import articles, categories, users, comments, tags
+from app.routers import articles, categories, users, comments, tags, likes
 
 # 建表
 Base.metadata.create_all(bind=engine)
@@ -24,6 +24,7 @@ app.include_router(categories.router)
 app.include_router(users.router)
 app.include_router(comments.router)
 app.include_router(tags.router)
+app.include_router(likes.router)
 
 
 @app.get("/")

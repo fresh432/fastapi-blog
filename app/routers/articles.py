@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_
 
 from app.database import get_db
-from app.models import Article, Category, Comment, User
+from app.models import Article, Category, Comment, User, Like
 from app.auth import decode_token
 from fastapi.security import OAuth2PasswordBearer
 
@@ -40,6 +40,7 @@ class ArticleResponse(BaseModel):
     category_name: Optional[str] = None
     tags: List[dict] = []
     comments_count: int = 0
+    likes_count: int = 0
     created_at: datetime
 
     class Config:
@@ -146,7 +147,8 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
         category_id=article.category_id,
         created_at=article.created_at,
         tags=[{"id": tag.id, "name": tag.name} for tag in article.tags],
-        comments_count=db.query(Comment).filter(Comment.article_id == article_id).count()
+        comments_count=db.query(Comment).filter(Comment.article_id == article_id).count(),
+        likes_count=db.query(Like).filter(Like.article_id == article_id).count()
     )
 
     if article.category_id:
