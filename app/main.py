@@ -2,7 +2,10 @@
 FastAPI 博客系统 - 主入口（路由拆分版）
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from slowapi import _rate_limit_exceeded_handler
+from app.core.limiter import limiter
+from slowapi.errors import RateLimitExceeded
 from app.database import engine, Base
 
 # 导入路由
@@ -17,6 +20,10 @@ app = FastAPI(
     description="学习 FastAPI 的后端项目（路由拆分版）",
     version="0.2.0"
 )
+
+# 注册限流器
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # 注册路由
 app.include_router(articles.router)

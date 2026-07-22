@@ -2,7 +2,7 @@
 文章路由模块
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models import Article, Category, Comment, User, Like
 from app.auth import decode_token
 from fastapi.security import OAuth2PasswordBearer
+from app.core.limiter import limiter
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -66,13 +67,15 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 # ========== 路由 ==========
 
 @router.get("/search")
+@limiter.limit("10/minute")
 def search_articles(
+        request: Request,
         q: str = Query(..., min_length=1, description="搜索关键词"),
         skip: int = Query(0, ge=0, description="跳过条数"),
         limit: int = Query(10, ge=1, le=100, description="每页条数"),
         db: Session = Depends(get_db)
 ):
-    """搜索文章 (支持分页)"""
+    """搜索文章 (限流: 10次/分钟)"""
     query = db.query(Article).filter(
         or_(
             Article.title.contains(q),
