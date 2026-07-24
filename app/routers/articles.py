@@ -14,6 +14,8 @@ from app.models import Article, Category, Comment, User, Like
 from app.auth import decode_token
 from fastapi.security import OAuth2PasswordBearer
 from app.core.limiter import limiter
+from app.core.cache import get_cache, set_cache, delete_cache, delete_cache_pattern
+import json
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -99,7 +101,7 @@ def create_article(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """创建文章"""
+    """创建文章 (清楚文章列表缓存) """
     if article.category_id:
         category = db.query(Category).filter(Category.id == article.category_id).first()
         if not category:
@@ -114,6 +116,10 @@ def create_article(
     db.add(db_article)
     db.commit()
     db.refresh(db_article)
+
+    # 清除文章列表缓存
+    delete_cache_pattern("fastapi:articles:list:*")
+
     return db_article
 
 
@@ -123,43 +129,68 @@ def list_articles(
     limit: int = Query(10, ge=1, le=100, description="每条页数"),
     db: Session = Depends(get_db)
 ):
-    """获取文章列表 (支持分页) """
+    """获取文章列表 (支持Redis缓存) """
+    cache_key = f"fastapi:articles:list:{skip}:{limit}"
+
+    # 先查缓存
+    cached = get_cache(cache_key)
+    if cached:
+        return json.loads(cached)
+
     articles = db.query(Article).offset(skip).limit(limit).all()
     total = db.query(Article).count()
 
-    return {
+    result = {
         "total": total,
         "skip": skip,
         "limit": limit,
-        "articles": articles
+        "articles": [
+            {
+                "id": a.id,
+                "title": a.title,
+                "content": a.content,
+                "author": a.author,
+                "category_id": a.category_id,
+                "created_at": a.created_at.isoformat() if a.created_at else None
+            }
+            for a in articles
+        ]
     }
+
+    # 写入缓存，5分钟过期
+    set_cache(cache_key, json.dumps(result), expire=300)
+
+    return result
 
 
 @router.get("/{article_id}", response_model=ArticleResponse)
 def get_article(article_id: int, db: Session = Depends(get_db)):
-    """获取单篇文章 (含标签) """
+    """获取单篇文章 (支持缓存) """
+    cache_key = f"fastapi:article:{article_id}"
+
+    cached = get_cache(cache_key)
+    if cached:
+        return json.loads(cached)
+
     article = db.query(Article).filter(Article.id == article_id).first()
     if not article:
         raise HTTPException(status_code=404, detail="文章不存在")
 
-    response = ArticleResponse(
-        id=article.id,
-        title=article.title,
-        content=article.content,
-        author=article.author,
-        category_id=article.category_id,
-        created_at=article.created_at,
-        tags=[{"id": tag.id, "name": tag.name} for tag in article.tags],
-        comments_count=db.query(Comment).filter(Comment.article_id == article_id).count(),
-        likes_count=db.query(Like).filter(Like.article_id == article_id).count()
-    )
+    result = {
+        "id": article.id,
+        "title": article.title,
+        "content": article.content,
+        "author": article.author,
+        "category_id": article.category_id,
+        "tags": [{"id": t.id, "name": t.name} for t in article.tags],
+        "likes_count": db.query(Like).filter(Like.article_id == article_id).count(),
+        "comments_count": db.query(Comment).filter(Comment.article_id == article_id).count(),
+        "created_at": article.created_at.isoformat() if article.created_at else None
+    }
 
-    if article.category_id:
-        category = db.query(Category).filter(Category.id == article.category_id).first()
-        if category:
-            response.category_name = category.name
+    set_cache(cache_key, json.dumps(result), expire=600)  # 10分钟
 
-    return response
+    return result
 
 
 @router.put("/{article_id}", response_model=ArticleResponse)

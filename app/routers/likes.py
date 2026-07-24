@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models import Like, Article, User
 from app.auth import decode_token
 from fastapi.security import OAuth2PasswordBearer
+from app.core.cache import delete_cache, delete_cache_pattern
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -34,7 +35,7 @@ def like_article(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """点赞文章"""
+    """点赞文章 (清除文章缓存) """
     # 检查文章存在
     article = db.query(Article).filter(Article.id == article_id).first()
     if not article:
@@ -55,6 +56,11 @@ def like_article(
 
     # 返回点赞数
     count = db.query(Like).filter(Like.article_id == article_id).count()
+
+    # 清除文章缓存
+    delete_cache(f"fastapi:article:{article_id}")
+    delete_cache_pattern("fastapi:articles:list:*")
+
     return {"message": "点赞成功", "likes_count": count}
 
 @router.delete("/{article_id}")
