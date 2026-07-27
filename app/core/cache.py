@@ -11,7 +11,7 @@ from typing import Optional, Any
 redis_client = redis.Redis(
     host='192.168.60.128',
     port=6379,
-    password="12345dcb@",
+    password="",
     db=0,
     decode_responses=True
 )
