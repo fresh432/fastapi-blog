@@ -14,7 +14,7 @@ from app.models import Article, Category, Comment, User, Like
 from app.auth import decode_token
 from fastapi.security import OAuth2PasswordBearer
 from app.core.limiter import limiter
-from app.core.cache import get_cache, set_cache, delete_cache, delete_cache_pattern
+from app.core.cache import get_cache, set_cache, delete_cache, delete_cache_pattern, set_null_cache, is_null_value
 import json
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -135,6 +135,8 @@ def list_articles(
     # 先查缓存
     cached = get_cache(cache_key)
     if cached:
+        if is_null_value(cached):
+            return {"total": 0, "skip": skip, "limit": limit, "articles": []}
         return json.loads(cached)
 
     articles = db.query(Article).offset(skip).limit(limit).all()
@@ -157,8 +159,11 @@ def list_articles(
         ]
     }
 
-    # 写入缓存，5分钟过期
-    set_cache(cache_key, json.dumps(result), expire=300)
+    # 空值缓存防穿透 / 正常缓存
+    if total == 0:
+        set_null_cache(cache_key, 60)
+    else:
+        set_cache(cache_key, json.dumps(result), base_expire=300)
 
     return result
 
@@ -170,10 +175,13 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
 
     cached = get_cache(cache_key)
     if cached:
+        if is_null_value(cached):
+            raise HTTPException(status_code=404, detail="文章不存在")
         return json.loads(cached)
 
     article = db.query(Article).filter(Article.id == article_id).first()
     if not article:
+        set_null_cache(cache_key, 60)
         raise HTTPException(status_code=404, detail="文章不存在")
 
     result = {
@@ -188,7 +196,7 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
         "created_at": article.created_at.isoformat() if article.created_at else None
     }
 
-    set_cache(cache_key, json.dumps(result), expire=600)  # 10分钟
+    set_cache(cache_key, json.dumps(result), base_expire=600)  # 10分钟
 
     return result
 
@@ -216,6 +224,11 @@ def update_article(
 
     db.commit()
     db.refresh(db_article)
+
+    # 清除缓存
+    delete_cache(f"fastapi:article:{article_id}")
+    delete_cache_pattern("fastapi:articles:list:*")
+
     return db_article
 
 
@@ -227,4 +240,9 @@ def delete_article(article_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="文章不存在")
     db.delete(article)
     db.commit()
+
+    # 清除缓存
+    delete_cache(f"fastapi:article:{article_id}")
+    delete_cache_pattern("fastapi:articles:list:*")
+
     return {"message": "删除成功"}

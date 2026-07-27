@@ -11,6 +11,7 @@ from typing import Optional, Any
 redis_client = redis.Redis(
     host='192.168.60.128',
     port=6379,
+    password="12345dcb@",
     db=0,
     decode_responses=True
 )
@@ -19,7 +20,7 @@ def get_cache(key: str) -> Optional[str]:
     """获取缓存"""
     return redis_client.get(key)
 
-def set_cache(key: str, value: str, expire: int = 300):
+def set_cache(key: str, value: str, base_expire: int = 300):
     """
     设置缓存，随机过期时间防止雪崩
     """

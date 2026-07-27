@@ -82,6 +82,11 @@ def unlike_article(
     db.commit()
 
     count = db.query(Like).filter(Like.article_id == article_id).count()
+
+    # 清除文章缓存
+    delete_cache(f"fastapi:article:{article_id}")
+    delete_cache_pattern("fastapi:articles:list:*")
+
     return {"message": "取消点赞成功", "likes_count": count}
 
 @router.get("/{article_id}/count")
