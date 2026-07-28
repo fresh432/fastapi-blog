@@ -16,7 +16,9 @@ class Article(Base):
     content = Column(Text, nullable=False)
     author = Column(String(50), default="匿名")
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
+    status = Column(String(20), default="published")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True),onupdate=func.now())
 
     # 关联评论
     comments = relationship("Comment", back_populates="article", cascade="all, delete-orphan")

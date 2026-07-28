@@ -27,12 +27,14 @@ class ArticleCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="文章标题")
     content: str = Field(..., min_length=1, description="文章内容")
     category_id: Optional[int] = None
+    status: Optional[str] = Field(default="published", pattern="^(published|draft)$")
 
 class ArticleUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=100)
     content: Optional[str] = Field(None, min_length=1)
     category_id: Optional[int] = None
     author: Optional[str] = None
+    status: Optional[str] = Field(None, pattern="^(pubilished|draft)$")
 
 class ArticleResponse(BaseModel):
     id: int
@@ -45,6 +47,7 @@ class ArticleResponse(BaseModel):
     comments_count: int = 0
     likes_count: int = 0
     created_at: datetime
+    update_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -101,7 +104,7 @@ def create_article(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """创建文章 (清楚文章列表缓存) """
+    """创建文章 (支持草稿/发布) """
     if article.category_id:
         category = db.query(Category).filter(Category.id == article.category_id).first()
         if not category:
@@ -111,7 +114,8 @@ def create_article(
         title=article.title,
         content=article.content,
         author=current_user.username,
-        category_id=article.category_id
+        category_id=article.category_id,
+        status=article.status
     )
     db.add(db_article)
     db.commit()
@@ -127,10 +131,11 @@ def create_article(
 def list_articles(
     skip: int = Query(0, ge=0, description="跳过条数"),
     limit: int = Query(10, ge=1, le=100, description="每条页数"),
+    status: Optional[str] = Query(None, pattern="^(published|draft)$", description="文章状态筛选"),
     db: Session = Depends(get_db)
 ):
-    """获取文章列表 (支持Redis缓存) """
-    cache_key = f"fastapi:articles:list:{skip}:{limit}"
+    """获取文章列表 (支持状态筛选+Redis缓存) """
+    cache_key = f"fastapi:articles:list:{skip}:{limit}:{status or 'all'}"
 
     # 先查缓存
     cached = get_cache(cache_key)
@@ -139,8 +144,12 @@ def list_articles(
             return {"total": 0, "skip": skip, "limit": limit, "articles": []}
         return json.loads(cached)
 
-    articles = db.query(Article).offset(skip).limit(limit).all()
-    total = db.query(Article).count()
+    query = db.query(Article)
+    if status:
+        query = query.filter(Article.status == status)
+
+    articles = query.order_by(Article.created_at.desc()).offset(skip).limit(limit).all()
+    total = query.count()
 
     result = {
         "total": total,
@@ -153,6 +162,7 @@ def list_articles(
                 "content": a.content,
                 "author": a.author,
                 "category_id": a.category_id,
+                "status": a.status,
                 "created_at": a.created_at.isoformat() if a.created_at else None
             }
             for a in articles
@@ -167,6 +177,20 @@ def list_articles(
 
     return result
 
+@router.get("/drafts", response_model=List[ArticleResponse])
+def list_drafts(
+        skip: int = Query(0, ge=0),
+        limit: int = Query(10, ge=1, le=100),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """获取当前用户的草稿列表"""
+    articles = db.query(Article).filter(
+        Article.author == current_user.username,
+        Article.status == "draft"
+    ).order_by(Article.updated_at.desc()).offset(skip).limit(limit).all()
+
+    return articles
 
 @router.get("/{article_id}", response_model=ArticleResponse)
 def get_article(article_id: int, db: Session = Depends(get_db)):
@@ -208,7 +232,7 @@ def update_article(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """更新文章"""
+    """更新文章 (支持状态切换) """
     db_article = db.query(Article).filter(Article.id == article_id).first()
     if not db_article:
         raise HTTPException(status_code=404, detail="文章不存在")
