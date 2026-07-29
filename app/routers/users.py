@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 
+from app.tasks import send_welcome_email
 from app.database import get_db
 from app.models import User
 from app.auth import verify_password, get_password_hash, create_access_token, decode_token
@@ -102,6 +103,10 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
+
+    # 异步发送欢迎邮件
+    send_welcome_email.delay(db_user.username)
+
     return db_user
 
 

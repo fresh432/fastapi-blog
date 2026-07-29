@@ -6,3 +6,5 @@ passlib
 python-jose
 slowapi
 booktype
+celery
+python-dotenv

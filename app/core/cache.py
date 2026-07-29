@@ -2,16 +2,22 @@
 Redis缓存配置
 """
 
+import os
+from dotenv import load_dotenv
 import redis
 import json
 import random
 from typing import Optional, Any
 
+load_dotenv()
+
+redis_password = os.getenv("REDIS_PASSWORD", "")
+
 # Redis连接
 redis_client = redis.Redis(
     host='192.168.60.128',
     port=6379,
-    password="",
+    password=redis_password,
     db=0,
     decode_responses=True
 )

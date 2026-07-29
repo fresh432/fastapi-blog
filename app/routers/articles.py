@@ -9,6 +9,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 
+from app.tasks import count_article_views
 from app.database import get_db
 from app.models import Article, Category, Comment, User, Like
 from app.auth import decode_token
@@ -123,6 +124,9 @@ def create_article(
 
     # 清除文章列表缓存
     delete_cache_pattern("fastapi:articles:list:*")
+
+    # 异步触发阅读量统计 (初始化)
+    count_article_views.delay(db_article.id)
 
     return db_article
 
