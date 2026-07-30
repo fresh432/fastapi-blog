@@ -4,12 +4,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+redis_host = os.getenv("REDIS_HOST", "localhost")
 redis_password = os.getenv("REDIS_PASSWORD", "")
 
 celery_app = Celery(
     "fastapi_blog",
-    broker=f"redis://:{redis_password}@192.168.60.128:6379/1",
-    backend=f"redis://:{redis_password}@192.168.60.128:6379/2",
+    broker=f"redis://:{redis_password}@{redis_host}:6379/1",
+    backend=f"redis://:{redis_password}@{redis_host}:6379/2",
     include=["app.tasks"]
 )
 

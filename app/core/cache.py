@@ -11,11 +11,12 @@ from typing import Optional, Any
 
 load_dotenv()
 
+redis_host = os.getenv("REDIS_HOST", "localhost")
 redis_password = os.getenv("REDIS_PASSWORD", "")
 
 # Redis连接
 redis_client = redis.Redis(
-    host='192.168.60.128',
+    host=redis_host,
     port=6379,
     password=redis_password,
     db=0,

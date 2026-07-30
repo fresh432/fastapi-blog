@@ -8,3 +8,4 @@ slowapi
 booktype
 celery
 python-dotenv
+redis>=5.0.0
