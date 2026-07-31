@@ -5,6 +5,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
+from sqlalchemy import func
 
 from app.database import get_db
 from app.models import Category, Article, User
@@ -65,20 +66,22 @@ def create_category(category: CategoryCreate, db: Session = Depends(get_db)):
 
 @router.get("", response_model=List[CategoryResponse])
 def list_categories(db: Session = Depends(get_db)):
-    """获取所有分类"""
-    categories = db.query(Category).all()
-
-    result = []
-    for category in categories:
-        count = db.query(Article).filter(Article.category_id == category.id).count()
-        cat_response = CategoryResponse(
-            id=category.id,
-            name=category.name,
-            articles_count=count
+    """获取所有分类 (优化: 避免N+1查询) """
+    results = (
+        db.query(
+            Category.id,
+            Category.name,
+            func.count(Article.id).label("articles_count")
         )
-        result.append(cat_response)
+        .outerjoin(Article, Article.category_id == Category.id)
+        .group_by(Category.id)
+        .all()
+    )
 
-    return result
+    return [
+        CategoryResponse(id=r.id, name=r.name, articles_count=r.articles_count)
+        for r in results
+    ]
 
 
 @router.get("/{category_id}/articles")

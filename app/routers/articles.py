@@ -143,7 +143,7 @@ def list_articles(
 
     # 先查缓存
     cached = get_cache(cache_key)
-    if cached:
+    if cached is not None:
         if is_null_value(cached):
             return {"total": 0, "skip": skip, "limit": limit, "articles": []}
         return json.loads(cached)
@@ -202,7 +202,7 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
     cache_key = f"fastapi:article:{article_id}"
 
     cached = get_cache(cache_key)
-    if cached:
+    if cached is not None:
         if is_null_value(cached):
             raise HTTPException(status_code=404, detail="文章不存在")
         return json.loads(cached)
