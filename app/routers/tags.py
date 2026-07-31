@@ -43,7 +43,7 @@ def add_tag_to_article(article_id: int, tag_id: int, db: Session = Depends(get_d
     db.commit()
     return {"message": "标签添加成功"}
 
-@router.get("{tag_id}/articles")
+@router.get("/{tag_id}/articles")
 def get_tag_articles(tag_id: int, db: Session = Depends(get_db)):
     """获取标签下的所有文章"""
     tag = db.query(Tag).filter(Tag.id == tag_id).first()

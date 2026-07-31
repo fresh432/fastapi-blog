@@ -35,7 +35,7 @@ class ArticleUpdate(BaseModel):
     content: Optional[str] = Field(None, min_length=1)
     category_id: Optional[int] = None
     author: Optional[str] = None
-    status: Optional[str] = Field(None, pattern="^(pubilished|draft)$")
+    status: Optional[str] = Field(None, pattern="^(published|draft)$")
 
 class ArticleResponse(BaseModel):
     id: int
@@ -241,6 +241,9 @@ def update_article(
     if not db_article:
         raise HTTPException(status_code=404, detail="文章不存在")
 
+    if db_article.author != current_user.username:
+        raise HTTPException(status_code=403, detail="无权操作他人文章")
+
     update_data = article_update.model_dump(exclude_unset=True)
     if "category_id" in update_data and update_data["category_id"] is not None:
         category = db.query(Category).filter(Category.id == update_data["category_id"]).first()
@@ -261,11 +264,19 @@ def update_article(
 
 
 @router.delete("/{article_id}")
-def delete_article(article_id: int, db: Session = Depends(get_db)):
+def delete_article(
+        article_id: int,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
     """删除文章"""
     article = db.query(Article).filter(Article.id == article_id).first()
     if not article:
         raise HTTPException(status_code=404, detail="文章不存在")
+
+    if article.author != current_user.username:
+        raise HTTPException(status_code=403, detail="无权操作他人文章")
+
     db.delete(article)
     db.commit()
 
