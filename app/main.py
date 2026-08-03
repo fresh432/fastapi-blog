@@ -9,7 +9,7 @@ from slowapi.errors import RateLimitExceeded
 from app.database import engine, Base
 
 # 导入路由
-from app.routers import articles, categories, users, comments, tags, likes
+from app.routers import articles, categories, users, comments, tags, likes, ai
 
 # 建表
 Base.metadata.create_all(bind=engine)
@@ -32,6 +32,7 @@ app.include_router(users.router)
 app.include_router(comments.router)
 app.include_router(tags.router)
 app.include_router(likes.router)
+app.include_router(ai.router)
 
 
 @app.get("/")
