@@ -1,29 +1,58 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.params import Depends
 from fastapi.responses import StreamingResponse
 from openai import APIError, APITimeoutError
+import json
+import traceback
 
-from app.schemas.ai import ChatRequest, ChatResponse
+from app.schemas.ai import ChatRequest, ChatResponse, SummarizeResponse, SummarizeRequest
 from app.services.llm import get_llm_client
+from app.services.chat_history import get_history, add_to_history, clear_history
+from app.routers.users import get_current_user # 复用用户认证1
+from app.models import User
 from app.core.config import settings
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
+def _build_messages(username: str, request: ChatRequest) -> list:
+    """构建完整消息列表 (含历史) """
+    messages = [{"role": "system", "content": "你是一个技术博客助手"}]
+
+    if request.use_history:
+        if request.clear_history:
+            clear_history(username)
+        else:
+            messages.extend(get_history(username))
+
+    for m in request.messages:
+        messages.append({"role": m.role, "content": m.content})
+
+    return messages
+
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    """非流式对话接口"""
+async def chat(request: ChatRequest, current_user: User = Depends(get_current_user)):
+    """非流式对话接口 (支持历史记录, 自动识别当前登录用户) """
     client = get_llm_client()
     model = request.model or settings.LLM_MODEL
+    messages = _build_messages(current_user.username, request)
 
     try:
         response = client.chat.completions.create(
             model=model,
-            messages=[{"role": m.role, "content": m.content} for m in request.messages],
+            messages=messages,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
         )
 
+        content = response.choices[0].message.content
+
+        if request.use_history:
+            for m in request.messages:
+                add_to_history(current_user.username, m.role, m.content)
+            add_to_history(current_user.username, "assistant", content)
+
         return ChatResponse(
-            content=response.choices[0].message.content,
+            content=content,
             model=model,
             usage=response.usage.model_dump() if response.usage else None
         )
@@ -35,8 +64,14 @@ async def chat(request: ChatRequest):
     except Exception:
         raise HTTPException(status_code=500, detail="服务暂不可用")
 
-async def _stream_generator(client, model, messages, temperature, max_tokens):
+async def _stream_generator(
+        client, model, messages,
+        temperature, max_tokens, username,
+        request_messages, use_history
+):
     """流式生成器"""
+    content_parts = []
+
     try:
         stream = client.chat.completions.create(
             model=model,
@@ -48,20 +83,79 @@ async def _stream_generator(client, model, messages, temperature, max_tokens):
 
         for chunk in stream:
             if chunk.choices[0].delta.content:
-                yield f"data: {chunk.choices[0].delta.content}\n\n"
+                part = chunk.choices[0].delta.content
+                content_parts.append(part)
+                yield f"data: {part}\n\n"
         yield "data: [DONE]\n\n"
+
+        if use_history:
+            for m in request_messages:
+                add_to_history(username, m.role, m.content)
+            add_to_history(username, "assistant", "".join(content_parts))
 
     except Exception as e:
         yield f"data: [ERROR] {str(e)}\n\n"
 
 @router.post("/chat/stream")
-async  def chat_stream(request:ChatRequest):
-    """流式对话接口 (SSE)"""
+async  def chat_stream(request:ChatRequest, current_user: User = Depends(get_current_user)):
+    """流式对话接口 (SSE, 支持历史记录, 自动识别当前登录用户) """
     client = get_llm_client()
     model = request.model or settings.LLM_MODEL
-    message = [{"role": m.role, "content": m.content} for m in request.messages]
+    message = _build_messages(current_user.username, request)
 
     return StreamingResponse(
-        _stream_generator(client, model, message, request.temperature, request.max_tokens),
+        _stream_generator(
+            client, model, message,
+            request.temperature, request.max_tokens,
+            current_user.username, request.messages, request.use_history
+        ),
         media_type="text/event-stream",
     )
+
+@router.post("/summarize", response_model=SummarizeResponse)
+async def summarize_article(request: SummarizeRequest):
+    """文章智能摘要 (结构化JSON输出) """
+    client = get_llm_client()
+    model = settings.LLM_MODEL
+
+    system_prompt = f"""你是一个技术文章摘要助手。请为以下文章生成摘要、关键词和推荐分类。
+要求：
+1. 摘要长度不超过{request.max_length}字
+2. 关键词3-5个
+3. 推荐分类从以下中选择：前端、后端、数据库、DevOps、AI、其他
+
+请严格按照以下JSON格式输出，不要输出其他内容：
+{{
+    "title": "文章标题",
+    "summary": "摘要内容",
+    "keywords": ["关键词1", "关键词2"],
+    "category": "推荐分类"
+}}"""
+
+    user_prompt = f"标题: {request.title}\n\n正文: {request.content}"
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.3,
+            max_tokens=1000,
+        )
+
+        result = json.loads(response.choices[0].message.content)
+        return SummarizeResponse(**result)
+
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="LLM返回格式错误")
+    except APITimeoutError:
+        raise HTTPException(status_code=504, detail="LLM请求超时")
+    except APIError as e:
+        raise HTTPException(status_code=502, detail=f"LLM服务错误: {e}")
+    except Exception as e:
+        print(f"❌ 接口报错详情: {e}")
+        traceback.print_exc()
+    raise HTTPException(status_code=500, detail="服务暂不可用")
