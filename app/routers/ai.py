@@ -1,10 +1,13 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.params import Depends
 from fastapi.responses import StreamingResponse
 from openai import APIError, APITimeoutError
 import json
 import traceback
+import os
+import uuid
 
+from app.services.rag import process_document, search_knowledge, UPLOAD_DIR
 from app.schemas.ai import ChatRequest, ChatResponse, SummarizeResponse, SummarizeRequest
 from app.services.llm import get_llm_client
 from app.services.chat_history import get_history, add_to_history, clear_history
@@ -159,3 +162,93 @@ async def summarize_article(request: SummarizeRequest):
         print(f"❌ 接口报错详情: {e}")
         traceback.print_exc()
     raise HTTPException(status_code=500, detail="服务暂不可用")
+
+@router.post("/upload")
+async def upload_document(
+        file: UploadFile = File(...),
+        current_user: User = Depends(get_current_user)
+):
+    """上传文档到知识库 (支持 txt/md) """
+    # 限制文件类型
+    if not file.filename.endswith((".txt", ".md")):
+        raise HTTPException(status_code=400, detail="仅支持 .txt 和 .md 文件")
+
+    # 保存文件
+    ext = os.path.splitext(file.filename)[1]
+    save_name = f"{current_user.username}_{uuid.uuid4().hex[:8]}{ext}"
+    file_path = os.path.join(UPLOAD_DIR, save_name)
+
+    with open(file_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    # 处理文档 (切分+Embedding+存储)
+    try:
+        chunk_count = process_document(file_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文档处理失败: {e}")
+
+    return {
+        "message": "上传成功",
+        "filename": file.filename,
+        "chunks": chunk_count,
+    }
+
+@router.post("/ask")
+async def ask_knowledge(
+        request: ChatRequest,
+        current_user: User = Depends(get_current_user)
+):
+    """基于知识库问答 (RAG) """
+    if not request.messages:
+        raise HTTPException(status_code=400, detail="消息不能为空")
+
+    # 获取用户最后一条问题
+    query = request.messages[-1].content
+
+    # 检索相关片段
+    try:
+        contexts =search_knowledge(query, k=3)
+    except Exception:
+        raise HTTPException(status_code=500, detail="知识库检索失败")
+
+    if not contexts:
+        raise HTTPException(status_code=404, detail="知识库中未找到相关内容")
+
+    # 构造 RAG Prompt
+    context_text = "\n\n".join(contexts)
+    prompt = f"""基于以下文档片段回答问题：
+
+    {context_text}
+
+    问题：{query}
+    请用中文简洁回答，如果文档中没有相关信息，请明确说明。"""
+
+    # 调用 LLM
+    client = get_llm_client()
+    model = request.model or settings.LLM_MODEL
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是一个知识库问答助手"},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+        )
+
+        return ChatResponse(
+            content=response.choices[0].message.content,
+            model=model,
+            usage=response.usage.model_dump() if response.usage else None,
+        )
+
+    except APITimeoutError:
+        raise HTTPException(status_code=504, detail="LLM请求超时")
+    except APIError:
+        raise HTTPException(status_code=502, detail=f"LLM服务错误: {e}")
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail="服务暂不可用")

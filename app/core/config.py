@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = "https://api.deepseek.com/v1"
     LLM_MODEL: str = "deepseek-chat"
     LLM_TIMEOUT: int = 30
+    QW_API_KEY: str = ""
 
     class Config:
         env_file = ".env"

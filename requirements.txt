@@ -13,3 +13,6 @@ pymysql>=1.0.0
 cryptography>=3.0
 pydantic-settings
 openai
+langchain-text-splitters
+langchain-community
+chromadb
