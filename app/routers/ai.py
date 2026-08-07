@@ -7,7 +7,7 @@ import traceback
 import os
 import uuid
 
-from app.services.rag import process_document, search_knowledge, UPLOAD_DIR
+from app.services.rag import process_document, hybrid_search, UPLOAD_DIR
 from app.schemas.ai import ChatRequest, ChatResponse, SummarizeResponse, SummarizeRequest
 from app.services.llm import get_llm_client
 from app.services.chat_history import get_history, add_to_history, clear_history
@@ -199,16 +199,16 @@ async def ask_knowledge(
         request: ChatRequest,
         current_user: User = Depends(get_current_user)
 ):
-    """基于知识库问答 (RAG) """
+    """基于知识库问答 (Hybrid Search: 向量+关键词混合检索) """
     if not request.messages:
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     # 获取用户最后一条问题
     query = request.messages[-1].content
 
-    # 检索相关片段
+    # 混合检索
     try:
-        contexts =search_knowledge(query, k=3)
+        contexts =hybrid_search(query, k=3)
     except Exception:
         raise HTTPException(status_code=500, detail="知识库检索失败")
 
@@ -247,7 +247,7 @@ async def ask_knowledge(
 
     except APITimeoutError:
         raise HTTPException(status_code=504, detail="LLM请求超时")
-    except APIError:
+    except APIError as e:
         raise HTTPException(status_code=502, detail=f"LLM服务错误: {e}")
     except Exception as e:
         print(e)
