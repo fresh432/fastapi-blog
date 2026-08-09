@@ -17,3 +17,6 @@ langchain-text-splitters
 langchain-community
 chromadb
 rank-bm25
+langchain-openai
+langchain-core
+langgraph

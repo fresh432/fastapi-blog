@@ -1,14 +1,16 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.params import Depends
 from fastapi.responses import StreamingResponse
+from langchain_classic.agents import initialize
 from openai import APIError, APITimeoutError
 import json
 import traceback
 import os
 import uuid
 
+from app.services.agent import run_agent, graph
 from app.services.rag import process_document, hybrid_search, UPLOAD_DIR
-from app.schemas.ai import ChatRequest, ChatResponse, SummarizeResponse, SummarizeRequest
+from app.schemas.ai import ChatRequest, ChatResponse, SummarizeResponse, SummarizeRequest, AgentRequest, AgentResponse
 from app.services.llm import get_llm_client
 from app.services.chat_history import get_history, add_to_history, clear_history
 from app.routers.users import get_current_user # 复用用户认证1
@@ -252,3 +254,59 @@ async def ask_knowledge(
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail="服务暂不可用")
+
+@router.post("/agent", response_model=AgentResponse)
+async def agent_chat(
+        request: AgentRequest,
+        current_user: User = Depends(get_current_user)
+):
+    """
+    Agent 智能体对话接口（非流式）
+    支持工具调用：搜索知识库 / 计算 / 获取时间
+    """
+    model = request.model or settings.LLM_MODEL
+
+    try:
+        messages = [{"role": m.role, "content": m.content} for m in request.messages]
+        content = run_agent(messages)
+
+        return AgentResponse(
+            content=content,
+            model=model,
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Agent 执行失败: {e}")
+
+def _agent_stream_generator(messages: list):
+    """Agent 流式生成器"""
+    initial_state = {"messages": messages}
+
+    for event in graph.stream(initial_state, stream_mode="values"):
+        last_msg = event["messages"][-1]
+
+        # 工具调用
+        if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+            for tc in last_msg.tool_calls:
+                yield f"data: [调用工具] {tc['name']}({tc['args']})\n\n"
+
+        elif hasattr(last_msg, "content") and last_msg.content:
+            yield f"data: {last_msg.content}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+@router.post("/agent/stream")
+async def agent_chat_stream(
+        request: AgentRequest,
+        current_user: User = Depends(get_current_user)
+):
+    """
+    Agent 智能体对话接口 (SSE 流式)
+    实时返回思考过程, 工具调用, 最终回答
+    """
+    messages = [{"role": m.role, "content": m.content} for m in request.messages]
+
+    return StreamingResponse(
+        _agent_stream_generator(messages),
+        media_type="text/event-stream",
+    )

@@ -28,3 +28,13 @@ class SummarizeResponse(BaseModel):
     summary: str = Field(..., description="文章摘要")
     keywords: List[str] = Field(..., description="关键词列表")
     category: Optional[str] = Field(default=None, description="推荐分类")
+
+class AgentRequest(BaseModel):
+    messages: List[ChatMessage] = Field(..., description="对话消息列表")
+    model: Optional[str] = Field(default=None, description="模型名称")
+    temperature: Optional[float] = Field(default=0.3, ge=0, le=2)
+
+class AgentResponse(BaseModel):
+    content: str = Field(..., description="Agent 最终回复")
+    model: str = Field(..., description="使用的模型")
+

@@ -1,0 +1,103 @@
+"""
+Agent 核心服务：LangGraph + 真实 LLM + 工具调用
+"""
+
+import os
+from typing import TypedDict, Annotated
+import operator
+
+from langchain_openai import ChatOpenAI
+from langchain_core.tools import tool
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
+
+from app.core.config import settings
+from app.services.rag import hybrid_search
+
+# ========== 工具定义 ==========
+
+@tool
+def search_knowledge(query: str) -> str:
+    """搜索知识库, 用于回答文档相关问题"""
+    try:
+        results = hybrid_search(query, k=2)
+        if not results:
+            return "知识库中未找到相关内容"
+        return "\n\n".join([f"[文档片段] {r}" for r in results])
+    except Exception as e:
+        return f"搜索失败: {e}"
+
+@tool
+def calculate(expression: str) -> str:
+    """数学计算器, 支持加减乘除"""
+    try:
+        allowed = set("0123456789+-*/.() ")
+        if not all(c in allowed for c in expression):
+            return "错误: 包含非法字符"
+        result = eval(expression)
+        return f"计算结果: {result}"
+    except Exception as e:
+        return f"计算失败: {e}"
+
+@tool
+def get_current_time() -> str:
+    """获取当前时间"""
+    from datetime import datetime
+    return datetime.now().strftime("当前时间: %Y-%m-%d %H:%M:%S")
+
+tools = [search_knowledge, calculate, get_current_time]
+tool_node = ToolNode(tools)
+
+# ========== 状态图构建 ==========
+
+class AgentState(TypedDict):
+    messages: Annotated[list, operator.add]
+
+llm = ChatOpenAI(
+    base_url=settings.LLM_BASE_URL,
+    api_key=settings.LLM_API_KEY,
+    model=settings.LLM_MODEL,
+    temperature=0.3,
+)
+llm_with_tools = llm.bind_tools(tools)
+
+def agent_node(state: AgentState):
+    """Agent 思考节点"""
+    response = llm_with_tools.invoke(state["messages"])
+    return {"messages": [response]}
+
+def should_continue(state: AgentState):
+    """判断是否继续调用工具"""
+    last_message = state["messages"][-1]
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        return "continue"
+    return "end"
+
+builder = StateGraph(AgentState)
+builder.add_node("agent", agent_node)
+builder.add_node("tools", tool_node)
+builder.set_entry_point("agent")
+
+builder.add_conditional_edges(
+    "agent",
+    should_continue,
+    {
+        "continue": "tools",
+        "end": END,
+    }
+)
+builder.add_edge("tools", "agent")
+
+graph = builder.compile()
+
+
+def run_agent(messages: list) -> str:
+    """运行 Agent, 返回最终回复"""
+    result = graph.invoke({"messages": messages})
+    last_msg = result["messages"][-1]
+    return last_msg.content if hasattr(last_msg, "content") else str(last_msg)
+
+
+
+
+
