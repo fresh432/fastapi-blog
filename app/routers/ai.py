@@ -8,6 +8,7 @@ import traceback
 import os
 import uuid
 
+from app.services.agent_memory import save_memory, load_memory, clear_memory
 from app.services.agent import run_agent, graph
 from app.services.rag import process_document, hybrid_search, UPLOAD_DIR
 from app.schemas.ai import ChatRequest, ChatResponse, SummarizeResponse, SummarizeRequest, AgentRequest, AgentResponse
@@ -261,14 +262,35 @@ async def agent_chat(
         current_user: User = Depends(get_current_user)
 ):
     """
-    Agent 智能体对话接口（非流式）
-    支持工具调用：搜索知识库 / 计算 / 获取时间
+    Agent 智能体对话接口（支持记忆持久化）
+    - 传 thread_id 自动关联历史对话
+    - 传 clear_memory=true 清空历史
     """
     model = request.model or settings.LLM_MODEL
 
+    # 构建消息列表
+    messages = []
+
+    if request.thread_id:
+        if request.clear_memory:
+            clear_memory(request)
+        else:
+            history = load_memory(request.thread_id)
+            messages.extend(history)
+
+    # 添加本次消息
+    for m in request.messages:
+        messages.append({"role": m.role, "content": m.content})
+
     try:
-        messages = [{"role": m.role, "content": m.content} for m in request.messages]
-        content = run_agent(messages)
+        # 运行 Agent
+        result = graph.invoke({"messages": messages})
+        final_msg = result["messages"][-1]
+        content = final_msg.content if hasattr(final_msg, "content") else str(final_msg)
+
+        # 保存完整对话到 Redis
+        if request.thread_id:
+            save_memory(request.thread_id, result["messages"])
 
         return AgentResponse(
             content=content,
@@ -301,12 +323,47 @@ async def agent_chat_stream(
         current_user: User = Depends(get_current_user)
 ):
     """
-    Agent 智能体对话接口 (SSE 流式)
-    实时返回思考过程, 工具调用, 最终回答
+    Agent 智能体对话接口（SSE 流式，支持记忆持久化）
     """
-    messages = [{"role": m.role, "content": m.content} for m in request.messages]
+
+    # 构建消息列表 (同非流式)
+    messages = []
+
+    if request.thread_id:
+        if request.clear_memory:
+            clear_memory(request.thread_id)
+        else:
+            history = load_memory(request.thread_id)
+            messages.extend(history)
+
+    for m in request.messages:
+        messages.append({"role": m.role, "content": m.content})
+
+    async def _stream():
+        all_messages = list(messages) # 复制一份用于保存
+
+        for event in graph.stream({"messages": messages}, stream_mode="values"):
+            last_msg = event["messages"][-1]
+
+            # 工具调用
+            if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+                for tc in last_msg.tool_calls:
+                    yield f"data: [调用工具] {tc['name']}({tc['args']})\n\n"
+
+            # 最终回答
+            elif hasattr(last_msg, "content") and last_msg.content:
+                yield f"data: {last_msg.content}\n\n"
+
+            # 更新完整消息列表
+            all_messages = event["messages"]
+
+        yield "data: [DONE]\n\n"
+
+        # 保存到 Redis
+        if request.thread_id:
+            save_memory(request.thread_id, all_messages)
 
     return StreamingResponse(
-        _agent_stream_generator(messages),
+        _stream(),
         media_type="text/event-stream",
     )

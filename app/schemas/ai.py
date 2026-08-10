@@ -31,6 +31,8 @@ class SummarizeResponse(BaseModel):
 
 class AgentRequest(BaseModel):
     messages: List[ChatMessage] = Field(..., description="对话消息列表")
+    thread_id: Optional[str] = Field(default=None, description="对话线程ID, 用于关联历史")
+    clear_memory: bool = Field(default=False, description="是否清空历史记忆")
     model: Optional[str] = Field(default=None, description="模型名称")
     temperature: Optional[float] = Field(default=0.3, ge=0, le=2)
 
