@@ -2,7 +2,7 @@ fastapi==0.111.0
 uvicorn==0.30.0
 sqlalchemy==2.0.31
 pydantic==2.7.4
-passlib
+bcrypt
 python-jose
 slowapi
 booktype
@@ -20,3 +20,4 @@ rank-bm25
 langchain-openai
 langchain-core
 langgraph
+dashscope>=1.23.5

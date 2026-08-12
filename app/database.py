@@ -7,12 +7,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
+from urllib.parse import quote_plus
 
 load_dotenv()
 
 # MySQL 配置 (从环境变量读取，Docker Compose中设置)
+password = os.getenv("DB_PASSWORD")
 DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "root")
+DB_PASSWORD = quote_plus(password)
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "3306")
 DB_NAME = os.getenv("DB_NAME", "blog")

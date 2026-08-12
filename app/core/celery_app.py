@@ -1,11 +1,13 @@
 from celery import Celery
 import os
 from dotenv import load_dotenv
+from urllib.parse import quote_plus
 
 load_dotenv()
 
 redis_host = os.getenv("REDIS_HOST", "localhost")
-redis_password = os.getenv("REDIS_PASSWORD", "")
+password = os.getenv("DB_PASSWORD")
+redis_password = quote_plus(password)
 
 celery_app = Celery(
     "fastapi_blog",
