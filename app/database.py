@@ -2,24 +2,20 @@
 FastAPI 博客系统 - 数据库配置(MySQL版)
 """
 
-import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
 from urllib.parse import quote_plus
 
-load_dotenv()
+from app.core.config import settings
 
-# MySQL 配置 (从环境变量读取，Docker Compose中设置)
-password = os.getenv("DB_PASSWORD")
-DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = quote_plus(password)
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "3306")
-DB_NAME = os.getenv("DB_NAME", "blog")
+# MySQL 配置从统一配置中心读取
+DB_PASSWORD = quote_plus(settings.DB_PASSWORD)
 
-SQLALCHEMY_DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+SQLALCHEMY_DATABASE_URL = (
+    f"mysql+pymysql://{settings.DB_USER}:{DB_PASSWORD}"
+    f"@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
+)
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,

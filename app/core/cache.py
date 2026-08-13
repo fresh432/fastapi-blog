@@ -2,24 +2,19 @@
 Redis缓存配置
 """
 
-import os
-from dotenv import load_dotenv
 import redis
 import json
 import random
 from typing import Optional, Any
 
-load_dotenv()
+from app.core.config import settings
 
-redis_host = os.getenv("REDIS_HOST", "localhost")
-redis_password = os.getenv("REDIS_PASSWORD", "")
-
-# Redis连接
+# Redis连接（从统一配置读取）
 redis_client = redis.Redis(
-    host=redis_host,
-    port=6379,
-    password=redis_password,
-    db=0,
+    host=settings.REDIS_HOST,
+    port=settings.REDIS_PORT,
+    password=settings.REDIS_PASSWORD,
+    db=settings.REDIS_DB,
     decode_responses=True
 )
 

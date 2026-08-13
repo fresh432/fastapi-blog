@@ -1,12 +1,10 @@
 from celery import Celery
-import os
-from dotenv import load_dotenv
 from urllib.parse import quote_plus
 
-load_dotenv()
+from app.core.config import settings
 
-redis_host = os.getenv("REDIS_HOST", "localhost")
-password = os.getenv("DB_PASSWORD")
+redis_host = settings.REDIS_HOST
+password = settings.REDIS_PASSWORD
 redis_password = quote_plus(password)
 
 celery_app = Celery(
