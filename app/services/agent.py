@@ -5,6 +5,7 @@ Agent 核心服务：LangGraph + 真实 LLM + 工具调用
 import os
 from typing import TypedDict, Annotated
 import operator
+import logging
 
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
@@ -13,6 +14,8 @@ from langgraph.prebuilt import ToolNode
 
 from app.core.config import settings
 from app.services.rag import hybrid_search
+
+logger = logging.getLogger(__name__)
 
 # ========== 工具定义 ==========
 
@@ -92,11 +95,22 @@ graph = builder.compile()
 
 
 def run_agent(messages: list) -> str:
-    """运行 Agent, 返回最终回复"""
-    result = graph.invoke({"messages": messages})
-    last_msg = result["messages"][-1]
-    return last_msg.content if hasattr(last_msg, "content") else str(last_msg)
+    """
+    运行 Agent，返回最终回复（带异常捕获）
+    """
+    try:
+        # 限制消息长度, 防止token爆炸
+        if len(messages) > 50:
+            messages = messages[-50:]
+            logger.warning("消息历史超过50条, 已截断")
 
+        result = graph.invoke({"messages": messages})
+        last_msg = result["messages"][-1]
+        return last_msg.content if hasattr(last_msg, "content") else str(last_msg)
+
+    except Exception as e:
+        logger.error(f"Agent执行失败: {e}")
+        return "抱歉,服务暂时不可用,请稍后重试."
 
 
 

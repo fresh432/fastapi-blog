@@ -20,6 +20,8 @@ from app.core.config import settings
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
+MAX_FILE_SIZE = 5 * 1024 * 1024 # 5MB
+
 def _build_messages(username: str, request: ChatRequest) -> list:
     """构建完整消息列表 (含历史) """
     messages = [{"role": "system", "content": "你是一个技术博客助手"}]
@@ -171,10 +173,15 @@ async def upload_document(
         file: UploadFile = File(...),
         current_user: User = Depends(get_current_user)
 ):
-    """上传文档到知识库 (支持 txt/md) """
+    """上传文档到知识库 (支持 txt/md, 限制5MB) """
     # 限制文件类型
     if not file.filename.endswith((".txt", ".md")):
         raise HTTPException(status_code=400, detail="仅支持 .txt 和 .md 文件")
+
+    # 限制文件大小
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="文件大小超过5MB限制")
 
     # 保存文件
     ext = os.path.splitext(file.filename)[1]
@@ -202,7 +209,9 @@ async def ask_knowledge(
         request: ChatRequest,
         current_user: User = Depends(get_current_user)
 ):
-    """基于知识库问答 (Hybrid Search: 向量+关键词混合检索) """
+    """
+    基于知识库问答（Hybrid Search），无相关文档时降级为直接LLM回答
+    """
     if not request.messages:
         raise HTTPException(status_code=400, detail="消息不能为空")
 
@@ -215,17 +224,18 @@ async def ask_knowledge(
     except Exception:
         raise HTTPException(status_code=500, detail="知识库检索失败")
 
-    if not contexts:
-        raise HTTPException(status_code=404, detail="知识库中未找到相关内容")
-
     # 构造 RAG Prompt
-    context_text = "\n\n".join(contexts)
-    prompt = f"""基于以下文档片段回答问题：
-
-    {context_text}
-
-    问题：{query}
-    请用中文简洁回答，如果文档中没有相关信息，请明确说明。"""
+    if contexts:
+        context_text = "\n\n".join(contexts)
+        prompt = f"""基于以下文档片段回答问题：
+    
+        {context_text}
+    
+        问题：{query}
+        请用中文简洁回答，如果文档中没有相关信息，请明确说明。"""
+    else:
+        # 降级: 直接问LLM, 不强制404
+        prompt = query
 
     # 调用 LLM
     client = get_llm_client()

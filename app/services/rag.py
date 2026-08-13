@@ -60,8 +60,14 @@ def process_document(file_path: str) -> int:
     """
     global _bm25
 
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"文件不存在: {file_path}")
+
     loader = TextLoader(file_path, encoding="utf-8")
     documents = loader.load()
+
+    if not documents or not documents[0].page_content.strip():
+        return 0 # 空文档,不处理
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
@@ -101,6 +107,15 @@ def hybrid_search(query: str, k: int = 3) -> List[str]:
     """混合检索: 向量相似度 + BM25关键词, RRF融合重排序"""
     # 向量检索
     vectorstore = get_vectorstore()
+
+    # 检查向量库是否为空
+    try:
+        count = vectorstore._collection.count()
+        if count == 0:
+            return []
+    except Exception:
+        return []
+
     vector_docs = vectorstore.similarity_search(query, k=k*2)
     vector_results = [doc.page_content for doc in vector_docs]
 
