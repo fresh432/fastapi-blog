@@ -49,7 +49,7 @@ def _build_bm25():
     if not _all_chunks or not _all_chunks.get("documents"):
         return
 
-    documents = _all_chunks["documents"]
+    documents = _all_chunks.get("documents", []) if _all_chunks else []
     tokenized_docs = [doc.split() for doc in documents]
     _bm25 = BM25Okapi(tokenized_docs)
 
@@ -96,7 +96,7 @@ def _reciprocal_rank_fusion(vector_results: List[str], keyword_results: List[str
     for rank, doc in enumerate(vector_results):
         scores[doc] += 1.0 / (k + rank + 1)
 
-    for rank, doc in enumerate(vector_results):
+    for rank, doc in enumerate(keyword_results):
         scores[doc] += 1.0 / (k + rank + 1)
 
     # 按分数排序

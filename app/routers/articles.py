@@ -48,7 +48,7 @@ class ArticleResponse(BaseModel):
     comments_count: int = 0
     likes_count: int = 0
     created_at: datetime
-    update_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -245,6 +245,10 @@ def update_article(
         raise HTTPException(status_code=403, detail="无权操作他人文章")
 
     update_data = article_update.model_dump(exclude_unset=True)
+
+    # 禁止修改作者, 防止权限绕过
+    update_data.pop("author", None)
+
     if "category_id" in update_data and update_data["category_id"] is not None:
         category = db.query(Category).filter(Category.id == update_data["category_id"]).first()
         if not category:

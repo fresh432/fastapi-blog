@@ -189,7 +189,6 @@ async def upload_document(
     file_path = os.path.join(UPLOAD_DIR, save_name)
 
     with open(file_path, "wb") as f:
-        content = await file.read()
         f.write(content)
 
     # 处理文档 (切分+Embedding+存储)
@@ -283,7 +282,7 @@ async def agent_chat(
 
     if request.thread_id:
         if request.clear_memory:
-            clear_memory(request)
+            clear_memory(request.thread_id)
         else:
             history = load_memory(request.thread_id)
             messages.extend(history)
