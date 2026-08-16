@@ -324,7 +324,7 @@ def _agent_stream_generator(messages: list):
         elif hasattr(last_msg, "content") and last_msg.content:
             yield f"data: {last_msg.content}\n\n"
 
-        yield "data: [DONE]\n\n"
+    yield "data: [DONE]\n\n"
 
 @router.post("/agent/stream")
 async def agent_chat_stream(

@@ -19,7 +19,11 @@ SQLALCHEMY_DATABASE_URL = (
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    pool_pre_ping=True
+    pool_pre_ping=True,     # 连接存活检测, 防止TCP半开连接
+    pool_size=10,           # 常驻连接数, 减少三次握手开销
+    max_overflow=20,        # 峰值额外连接
+    pool_recycle=3600,      # 1小时回收, 配合MySQL wait_timeout
+    pool_timeout=30,        # 获取连接超时
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
