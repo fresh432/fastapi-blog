@@ -199,12 +199,47 @@ Authorization: Bearer {access_token}
 - 权限安全验证
 - 性能与缓存验证
 
+## 生产部署架构
+```plain
+┌─────────────┐     HTTPS      ┌─────────────┐     HTTP/1.1     ┌─────────────┐
+│   客户端     │ ─────────────→ │    Nginx    │ ───────────────→ │   Uvicorn   │
+│ (浏览器/APP) │   (TLS 1.2/1.3)│ 反向代理+SSL │  Keep-Alive长连接 │  (FastAPI)  │
+└─────────────┘                └─────────────┘                  └─────────────┘
+│
+↓
+┌─────────────┐
+│  MySQL 8.0  │
+└─────────────┘
+│
+↓
+┌─────────────┐
+│    Redis    │
+└─────────────┘
+```
+
+### Nginx 核心作用
+
+| 功能 | 说明 |
+|------|------|
+| SSL 终止 | Nginx 处理 HTTPS 解密，后端走 HTTP，减轻 Uvicorn 加密负担 |
+| Keep-Alive 管理 | 统一控制连接超时和最大请求数，防止空闲连接占用资源 |
+| 静态文件服务 | Nginx 直接返回静态资源，不经过 Uvicorn |
+| 负载均衡 | 多实例 Uvicorn 时，Nginx 轮询分发请求 |
+
+### 生产环境启动
+
+```bash
+# 使用生产版编排（含 Nginx + SSL）
+docker-compose -f docker-compose.prod.yml up -d
+```
+
 ## 部署注意事项
 
 1. **MySQL 密码特殊字符**：如密码含 `@` 等特殊字符，`database.py` 已使用 `quote_plus` 进行 URL 编码
 2. **bcrypt 4.x 兼容**：`auth.py` 使用原生 bcrypt 并截断 72 字节，避免 `passlib` 兼容问题
 3. **Chroma 持久化**：Docker 部署时需挂载 `chroma_db` 目录，确保向量数据不丢失
 4. **LLM API Key**：AI 模块依赖外部 LLM 服务，请确保 `.env` 中配置有效 Key
+5. **Nginx Keep-Alive**：生产环境通过 Nginx 反向代理管理长连接，配置 `keepalive_timeout` 和 `keepalive_requests` 防止空闲连接占用资源
 
 ## 许可证
 
