@@ -225,6 +225,7 @@ Authorization: Bearer {access_token}
 | Keep-Alive 管理 | 统一控制连接超时和最大请求数，防止空闲连接占用资源 |
 | 静态文件服务 | Nginx 直接返回静态资源，不经过 Uvicorn |
 | 负载均衡 | 多实例 Uvicorn 时，Nginx 轮询分发请求 |
+| 网关限流 | Nginx limit_req 挡外层恶意流量，保护集群 |
 
 ### 生产环境启动
 
@@ -233,6 +234,28 @@ Authorization: Bearer {access_token}
 docker-compose -f docker-compose.prod.yml up -d
 ```
 
+## 静态资源与 CDN
+
+当前阶段：静态资源通过 Nginx 直接服务（`location /uploads/`）
+
+生产优化路径：
+- 将 `uploads/` 目录同步到对象存储（OSS/S3）
+- CDN 域名指向对象存储，Nginx 作为回源源站
+- 用户上传文件后异步触发 CDN 刷新缓存
+
+适用资源：用户头像、上传的文档、文章配图
+不适用：动态 API（/ai/chat、/articles 等实时接口）
+
+## 双层限流策略
+
+| 层级 | 工具 | 粒度 | 防护目标 |
+|------|------|------|---------|
+| 网关层 | Nginx limit_req | IP / URI | 抗 DDoS、防爬虫 |
+| 应用层 | slowapi | 用户 / API | 业务防刷、公平使用 |
+
+- Nginx 限流配置见 `nginx.conf`
+- slowapi 限流配置见 `core/limiter.py` 和各路由装饰器
+
 ## 部署注意事项
 
 1. **MySQL 密码特殊字符**：如密码含 `@` 等特殊字符，`database.py` 已使用 `quote_plus` 进行 URL 编码
@@ -240,6 +263,8 @@ docker-compose -f docker-compose.prod.yml up -d
 3. **Chroma 持久化**：Docker 部署时需挂载 `chroma_db` 目录，确保向量数据不丢失
 4. **LLM API Key**：AI 模块依赖外部 LLM 服务，请确保 `.env` 中配置有效 Key
 5. **Nginx Keep-Alive**：生产环境通过 Nginx 反向代理管理长连接，配置 `keepalive_timeout` 和 `keepalive_requests` 防止空闲连接占用资源
+6. **双层限流**：Nginx 网关层限流（防 DDoS）+ slowapi 应用层限流（防业务滥用），详见「双层限流策略」章节
+7. **CDN 预留**：静态资源（头像/文档）未来可接入 CDN，当前通过 Nginx 本地服务，架构已预留切换路径
 
 ## 许可证
 
