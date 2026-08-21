@@ -81,10 +81,14 @@ def search_articles(
         limit: int = Query(10, ge=1, le=100, description="每页条数"),
         db: Session = Depends(get_db)
 ):
-    """搜索文章 (限流: 10次/分钟)"""
+    """搜索文章 (限流: 10次/分钟)
+    优化点：
+    - title 使用前缀匹配 LIKE 'keyword%'，利用 B+树索引
+    - content 仍用 LIKE '%keyword%'，后续计划改 FULLTEXT 或 Elasticsearch
+    """
     query = db.query(Article).filter(
         or_(
-            Article.title.contains(q),
+            Article.title.like(f"{q}%"),            
             Article.content.contains(q)
         )
     )
