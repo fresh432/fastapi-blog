@@ -4,6 +4,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 from app.models import Like, Article, User
@@ -35,24 +36,19 @@ def like_article(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """点赞文章 (清除文章缓存) """
+    """点赞文章 (原子操作，唯一约束兜底) """
     # 检查文章存在
     article = db.query(Article).filter(Article.id == article_id).first()
     if not article:
         raise HTTPException(status_code=404, detail="文章不存在")
 
-    # 检查是否已点赞
-    existing = db.query(Like).filter(
-        Like.user_id == current_user.id,
-        Like.article_id == article_id
-    ).first()
-
-    if existing:
+    try:
+        like = Like(user_id=current_user.id, article_id=article_id)
+        db.add(like)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
         raise HTTPException(status_code=400, detail="已点赞")
-
-    like = Like(user_id=current_user.id, article_id=article_id)
-    db.add(like)
-    db.commit()
 
     # 返回点赞数
     count = db.query(Like).filter(Like.article_id == article_id).count()
@@ -69,7 +65,7 @@ def unlike_article(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """取消点赞"""
+    """取消点赞（事务包裹，异常回滚）"""
     like = db.query(Like).filter(
         Like.user_id == current_user.id,
         Like.article_id == article_id
@@ -78,8 +74,12 @@ def unlike_article(
     if not like:
         raise HTTPException(status_code=404, detail="未点赞")
 
-    db.delete(like)
-    db.commit()
+    try:
+        db.delete(like)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="取消点赞失败, 请稍后重试")
 
     count = db.query(Like).filter(Like.article_id == article_id).count()
 
