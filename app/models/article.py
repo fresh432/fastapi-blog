@@ -17,6 +17,7 @@ class Article(Base):
     author = Column(String(50), default="匿名", index=True)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     status = Column(String(20), default="published")
+    version = Column(Integer, default=0, nullable=False) # 乐观锁版本号
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True),onupdate=func.now())
 

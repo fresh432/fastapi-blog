@@ -240,7 +240,7 @@ def update_article(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """更新文章 (支持状态切换) """
+    """更新文章 (支持状态切换 + 乐观锁防并发覆盖) """
     db_article = db.query(Article).filter(Article.id == article_id).first()
     if not db_article:
         raise HTTPException(status_code=404, detail="文章不存在")
@@ -258,8 +258,18 @@ def update_article(
         if not category:
             raise HTTPException(status_code=404, detail="分类不存在")
 
-    for key, value in update_data.items():
-        setattr(db_article, key, value)
+    # 乐观锁: 记录当前版本号
+    current_version = db_article.version
+    update_data["version"] = current_version + 1
+
+    # 带条件更新: 只有版本号未变时才成功
+    rows = db.query(Article).filter(
+        Article.id == article_id,
+        Article.version == current_version
+    ).update(update_data)
+
+    if rows == 0:
+        raise HTTPException(status_code=409, detail="文章已被他人修改, 请稍后重试")
 
     db.commit()
     db.refresh(db_article)
