@@ -256,6 +256,60 @@ docker-compose -f docker-compose.prod.yml up -d
 - Nginx 限流配置见 `nginx.conf`
 - slowapi 限流配置见 `core/limiter.py` 和各路由装饰器
 
+## 数据库优化
+
+### 索引设计
+
+| 字段 | 索引类型 | 用途 |
+|------|---------|------|
+| `articles.title` | 普通索引 | 支持前缀搜索 `LIKE 'keyword%'` |
+| `articles.author` | 普通索引 | 支持按作者筛选 |
+| `articles(author, status)` | 联合索引 | 支持组合筛选 |
+
+### 搜索优化路径
+
+当前实现：
+- **title**：`LIKE 'keyword%'` 前缀匹配，利用 B+树索引
+- **content**：`LIKE '%keyword%'` 模糊匹配，全表扫描
+
+后续优化方案：
+
+1. **MySQL FULLTEXT 全文索引**（轻量方案）
+   - 适合数据量 < 100 万
+   - 中文需配置 ngram 解析器
+   - SQLAlchemy：`func.match(Article.content, q)`
+
+2. **Elasticsearch**（专业方案）
+   - 文章发布时同步写入 ES
+   - 支持分词高亮、多字段权重排序
+   - 适合数据量大、搜索复杂度高的场景
+
+### 慢查询监控
+
+生产环境 MySQL 已开启慢查询日志：
+- `slow_query_log=ON`
+- `long_query_time=1s`
+- `log_queries_not_using_indexes=ON`
+
+分析工具：`mysqldumpslow` 或接入 Prometheus+Grafana。
+
+### 数据库迁移（Alembic）
+
+当前开发环境使用 `Base.metadata.create_all()` 自动建表。生产环境建议用 Alembic 管理迁移：
+
+```bash
+pip install alembic
+alembic init alembic
+```
+
+alembic/env.py 中从 app.core.config.settings.DATABASE_URL 读取数据库连接。
+新增索引时：
+
+```bash
+alembic revision --autogenerate -m "add article indexes"
+alembic upgrade head
+```
+
 ## 部署注意事项
 
 1. **MySQL 密码特殊字符**：如密码含 `@` 等特殊字符，`database.py` 已使用 `quote_plus` 进行 URL 编码

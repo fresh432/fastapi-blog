@@ -28,6 +28,11 @@ services:
       MYSQL_DATABASE: blog
     ports:
       - "3306:3306"
+    command: >
+      --slow_query_log=ON
+      --long_query_time=2
+      --log_output=FILE
+      --log_queries_not_using_indexes=ON
     volumes:
       - mysql_data:/var/lib/mysql
 
