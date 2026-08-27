@@ -9,7 +9,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 
-from app.tasks import count_article_views
+from app.tasks import count_article_views, delete_cache_delayed
 from app.database import get_db
 from app.models import Article, Category, Comment, User, Like
 from app.auth import decode_token
@@ -240,7 +240,7 @@ def update_article(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    """更新文章 (支持状态切换 + 乐观锁防并发覆盖) """
+    """更新文章 (支持状态切换 + 乐观锁防并发覆盖 + 延迟双删) """
     db_article = db.query(Article).filter(Article.id == article_id).first()
     if not db_article:
         raise HTTPException(status_code=404, detail="文章不存在")
@@ -278,6 +278,13 @@ def update_article(
     delete_cache(f"fastapi:article:{article_id}")
     delete_cache_pattern("fastapi:articles:list:*")
 
+    # 延迟双删：Celery异步执行，不阻塞请求
+    delete_cache_delayed.delay(
+        f"fastapi:article:{article_id}",
+        "fastapi:articles:list:*",
+        delay=2
+    )
+
     return db_article
 
 
@@ -301,5 +308,12 @@ def delete_article(
     # 清除缓存
     delete_cache(f"fastapi:article:{article_id}")
     delete_cache_pattern("fastapi:articles:list:*")
+
+    # 延迟双删：Celery异步执行
+    delete_cache_delayed.delay(
+        f"fastapi:article:{article_id}",
+        "fastapi:articles:list:*",
+        delay=2
+    )
 
     return {"message": "删除成功"}
