@@ -63,6 +63,8 @@ services:
       --save 300 10
       --save 60 10000
       --aof-use-rdb-preamble yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
     networks:
       - blog_network
     volumes:
