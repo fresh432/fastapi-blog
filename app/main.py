@@ -1,5 +1,12 @@
 """
 FastAPI 博客系统 - 主入口（路由拆分版）
+
+并发模型说明：
+- Web 层（articles/users/comments等）：同步路由，FastAPI自动提交到线程池执行
+  原因：SQLAlchemy 1.x同步版稳定，当前并发量下线程池足够，预留async迁移路径
+- AI 层（ai/chat/agent）：异步路由，基于asyncio+uvloop（epoll封装）
+  原因：LLM API调用是IO密集型，异步可避免阻塞，支持SSE流式响应
+- Celery：prefork进程池，适合CPU密集型任务（文章摘要、数据统计）
 """
 
 from fastapi import FastAPI, Request
