@@ -7,6 +7,7 @@ import json
 import traceback
 import os
 import uuid
+import re
 
 from app.services.agent_memory import save_memory, load_memory, clear_memory
 from app.services.agent import run_agent, graph
@@ -120,9 +121,34 @@ async  def chat_stream(request:ChatRequest, current_user: User = Depends(get_cur
         media_type="text/event-stream",
     )
 
+def _extract_keywords(text: str) -> set:
+    """简单关键次提取: 英文单词, 中文词语(2字以上), 数字"""
+    english = set(re.findall(r'[a-zA-Z]{2,}', text.lower()))
+    chinese = set(re.findall(r'[\u4e00-\u9fa5]{2,4}', text))
+    numbers = set(re.findall(r'\d+', text))
+    return english | chinese | numbers
+
+def _check_hallucination(summary: str, original: str, threshold: float = 0.5) -> dict:
+    """检查摘要是否存在幻觉"""
+    summary_kw = _extract_keywords(summary)
+    original_kw = _extract_keywords(original)
+
+    if not summary_kw:
+        return {"has_hallucination": False, "ratio": 1.0}
+
+    matched = summary_kw & original_kw
+    ratio = len(matched) / len(summary_kw) if summary_kw else 1.0
+
+    return {
+        "has_hallucination": ratio < threshold,
+        "ratio": round(ratio, 2),
+        "matched_count": len(matched),
+        "total_count": len(summary_kw),
+    }
+
 @router.post("/summarize", response_model=SummarizeResponse)
 async def summarize_article(request: SummarizeRequest):
-    """文章智能摘要 (结构化JSON输出) """
+    """文章智能摘要 (结构化JSON输出 + 幻觉后处理) """
     client = get_llm_client()
     model = settings.LLM_MODEL
 
@@ -131,6 +157,7 @@ async def summarize_article(request: SummarizeRequest):
 1. 摘要长度不超过{request.max_length}字
 2. 关键词3-5个
 3. 推荐分类从以下中选择：前端、后端、数据库、DevOps、AI、其他
+4. 摘要必须基于原文内容, 不要添加原文未提及的信息
 
 请严格按照以下JSON格式输出，不要输出其他内容：
 {{
@@ -155,6 +182,13 @@ async def summarize_article(request: SummarizeRequest):
         )
 
         result = json.loads(response.choices[0].message.content)
+
+        check = _check_hallucination(result.get("summary", ""), request.content)
+        if check["has_hallucination"]:
+            result["hallucination_warning"] = (
+                f"摘要可能包含原文未提及内容 (关键次匹配度{check['ratio']}) "
+            )
+
         return SummarizeResponse(**result)
 
     except json.JSONDecodeError:
