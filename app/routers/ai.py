@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.params import Depends
 from fastapi.responses import StreamingResponse
+from fastapi.concurrency import run_in_threadpool
 from langchain_classic.agents import initialize
 from openai import APIError, APITimeoutError
 import json
@@ -8,6 +9,7 @@ import traceback
 import os
 import uuid
 import re
+import asyncio
 
 from app.services.agent_memory import save_memory, load_memory, clear_memory
 from app.services.agent import run_agent, graph
@@ -305,7 +307,7 @@ async def agent_chat(
         current_user: User = Depends(get_current_user)
 ):
     """
-    Agent 智能体对话接口（支持记忆持久化）
+    Agent 智能体对话接口（支持记忆持久化 + 最大迭代限制 + 整体超时）
     - 传 thread_id 自动关联历史对话
     - 传 clear_memory=true 清空历史
     """
@@ -326,8 +328,16 @@ async def agent_chat(
         messages.append({"role": m.role, "content": m.content})
 
     try:
-        # 运行 Agent
-        result = graph.invoke({"messages": messages})
+        # 运行 Agent, 整体超时控制: 60秒
+        result = await asyncio.wait_for(
+            run_in_threadpool(
+                lambda: graph.invoke({
+                    "messages": messages,
+                    "iteration_count": 0
+                })
+            ),
+            timeout=60.0
+        )
         final_msg = result["messages"][-1]
         content = final_msg.content if hasattr(final_msg, "content") else str(final_msg)
 
@@ -340,6 +350,8 @@ async def agent_chat(
             model=model,
         )
 
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Agent执行超时, 请简化问题后重试")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent 执行失败: {e}")
 

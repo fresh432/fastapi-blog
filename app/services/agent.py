@@ -1,5 +1,5 @@
 """
-Agent 核心服务：LangGraph + 真实 LLM + 工具调用
+Agent 核心服务：LangGraph + 真实 LLM + 工具调用（增加迭代次数限制）
 """
 
 import os
@@ -55,6 +55,7 @@ tool_node = ToolNode(tools)
 
 class AgentState(TypedDict):
     messages: Annotated[list, operator.add]
+    iteration_count: int
 
 llm = ChatOpenAI(
     base_url=settings.LLM_BASE_URL,
@@ -65,12 +66,20 @@ llm = ChatOpenAI(
 llm_with_tools = llm.bind_tools(tools)
 
 def agent_node(state: AgentState):
-    """Agent 思考节点"""
+    """Agent 思考节点（增加迭代计数）"""
     response = llm_with_tools.invoke(state["messages"])
-    return {"messages": [response]}
+    return {
+        "messages": [response],
+        "iteration_count": state.get("iteration_count", 0) + 1
+    }
 
 def should_continue(state: AgentState):
-    """判断是否继续调用工具"""
+    """判断是否继续调用工具（增加迭代计数）"""
+    # 最大迭代次数限制, 防止无限循环
+    if state.get("iteration_count", 0) >= 5:
+        logger.warning(f"Agent达到最大迭代次数(5), 强制终止")
+        return "end"
+
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         return "continue"
@@ -96,7 +105,7 @@ graph = builder.compile()
 
 def run_agent(messages: list) -> str:
     """
-    运行 Agent，返回最终回复（带异常捕获）
+    运行 Agent，返回最终回复（带异常捕获 + 迭代限制）
     """
     try:
         # 限制消息长度, 防止token爆炸
@@ -104,7 +113,10 @@ def run_agent(messages: list) -> str:
             messages = messages[-50:]
             logger.warning("消息历史超过50条, 已截断")
 
-        result = graph.invoke({"messages": messages})
+        result = graph.invoke({
+            "messages": messages,
+            "iteration_count": 0
+        })
         last_msg = result["messages"][-1]
         return last_msg.content if hasattr(last_msg, "content") else str(last_msg)
 
