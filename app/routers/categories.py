@@ -103,7 +103,10 @@ def delete_category(
         category_id: int,
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)):
-    """删除分类（关联文章category_id设为NULL）"""
+    """删除分类（仅管理员可删除，关联文章category_id设为NULL）"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="无权操作, 仅管理员可删除分类")
+
     category = db.query(Category).filter(Category.id == category_id).first()
     if not category:
         raise HTTPException(status_code=404, detail="分类不存在")

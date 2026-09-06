@@ -15,4 +15,5 @@ class User(Base):
     password = Column(String(255), nullable=False)
     avatar = Column(String(255), nullable=True)
     bio = Column(Text, nullable=True)
+    role = Column(String(20), default="user", nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

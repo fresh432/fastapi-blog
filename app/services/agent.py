@@ -3,6 +3,7 @@ Agent 核心服务：LangGraph + 真实 LLM + 工具调用（增加迭代次数�
 """
 
 import os
+import ast
 from typing import TypedDict, Annotated
 import operator
 import logging
@@ -32,15 +33,52 @@ def search_knowledge(query: str) -> str:
 
 @tool
 def calculate(expression: str) -> str:
-    """数学计算器, 支持加减乘除"""
+    """数学计算器, 支持加减乘除 (基于AST安全解析) """
     try:
-        allowed = set("0123456789+-*/.() ")
-        if not all(c in allowed for c in expression):
-            return "错误: 包含非法字符"
-        result = eval(expression)
+        # 解析为AST, 只允许数字和加减乘除运算
+        tree = ast.parse(expression, mode='eval')
+        result = _safe_eval(tree.body)
         return f"计算结果: {result}"
     except Exception as e:
         return f"计算失败: {e}"
+
+def _safe_eval(node):
+    """
+    安全求值: 只允许数字常量和 + - * / 运算
+    彻底杜绝 eval 代码注入风险 (包括 Unicode 绕过)
+    """
+    if isinstance(node, ast.Constant):
+        if not isinstance(node.value, (int, float)):
+            raise ValueError("只允许数字")
+        return node.value
+    elif isinstance(node, ast.BinOp):
+        left = _safe_eval(node.left)
+        right = _safe_eval(node.right)
+
+        if isinstance(node.op, ast.Add):
+            return left + right
+        elif isinstance(node.op, ast.Sub):
+            return left - right
+        elif isinstance(node.op, ast.Mult):
+            return left * right
+        elif isinstance(node.op, ast.Div):
+            if right == 0:
+                raise ZeroDivisionError("除数不能为零")
+            return left / right
+        else:
+            raise ValueError("不支持的运算符")
+    elif isinstance(node, ast.UnaryOp):
+        operand = _safe_eval(node.operand)
+        if isinstance(node.op, ast.UAdd):
+            return +operand
+        elif isinstance(node.op, ast.USub):
+            return -operand
+        else:
+            raise ValueError("不支持的一元运算符")
+
+    else:
+        raise ValueError(f"不支持的表达式类型: {type(node).__name__}")
+
 
 @tool
 def get_current_time() -> str:
