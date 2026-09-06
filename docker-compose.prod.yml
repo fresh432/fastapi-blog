@@ -45,10 +45,10 @@ services:
       --long_query_time=1
       --log_output=FILE
       --log_queries_not_using_indexes=ON
-      --slow_query_log_file=/var/lib/mysql/slow.log
+      --slow_query_log_file=/var/log/mysql/slow.log
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./logs/mysql:/var/lib/mysql
+      - ./logs/mysql:/var/log/mysql
     networks:
       - blog_network
 
