@@ -131,7 +131,7 @@ def hybrid_search(query: str, k: int = 3) -> List[str]:
         # 获取top-k索引
         top_indices = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[:k*2]
 
-        documents = _all_chunks.get("document", []) if _all_chunks else []
+        documents = _all_chunks.get("documents", []) if _all_chunks else []
         keyword_results = [documents[i] for i in top_indices if i < len(documents)]
 
     # RRF融合
