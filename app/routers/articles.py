@@ -12,13 +12,10 @@ from sqlalchemy import or_
 from app.tasks import count_article_views, delete_cache_delayed
 from app.database import get_db
 from app.models import Article, Category, Comment, User, Like
-from app.auth import decode_token
-from fastapi.security import OAuth2PasswordBearer
 from app.core.limiter import limiter
 from app.core.cache import get_cache, set_cache, delete_cache, delete_cache_pattern, set_null_cache, is_null_value
+from app.core.dependencies import get_current_user
 import json
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 router = APIRouter(prefix="/articles", tags=["文章"])
 
@@ -52,23 +49,6 @@ class ArticleResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-# ========== 依赖：获取当前用户 ==========
-
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="无效的Token")
-
-    username = payload.get("sub")
-    if not username:
-        raise HTTPException(status_code=401, detail="Token中无用户信息")
-
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    return user
 
 # ========== 路由 ==========
 

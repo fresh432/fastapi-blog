@@ -10,6 +10,7 @@ import os
 import uuid
 import re
 import asyncio
+import copy
 
 from app.services.agent_memory import save_memory, load_memory, clear_memory
 from app.services.agent import run_agent, graph
@@ -17,7 +18,7 @@ from app.services.rag import process_document, hybrid_search, UPLOAD_DIR
 from app.schemas.ai import ChatRequest, ChatResponse, SummarizeResponse, SummarizeRequest, AgentRequest, AgentResponse
 from app.services.llm import get_llm_client
 from app.services.chat_history import get_history, add_to_history, clear_history
-from app.routers.users import get_current_user # 复用用户认证1
+from app.core.dependencies import get_current_user
 from app.models import User
 from app.core.config import settings
 
@@ -395,7 +396,8 @@ async def agent_chat_stream(
         messages.append({"role": m.role, "content": m.content})
 
     async def _stream():
-        all_messages = list(messages) # 复制一份用于保存
+        # 深拷贝消息列表, 避免引用赋值意外修改原始状态
+        all_messages = copy.deepcopy(list(messages)) # 复制一份用于保存
 
         for event in graph.stream({"messages": messages}, stream_mode="values"):
             last_msg = event["messages"][-1]
@@ -409,8 +411,8 @@ async def agent_chat_stream(
             elif hasattr(last_msg, "content") and last_msg.content:
                 yield f"data: {last_msg.content}\n\n"
 
-            # 更新完整消息列表
-            all_messages = event["messages"]
+            # 更新完整消息列表 (深拷贝保存, 避免引用原始状态)
+            all_messages = copy.deepcopy(event["messages"])
 
         yield "data: [DONE]\n\n"
 

@@ -10,10 +10,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 from app.tasks import send_welcome_email
 from app.database import get_db
 from app.models import User
-from app.auth import verify_password, get_password_hash, create_access_token, decode_token
-from fastapi.security import OAuth2PasswordBearer
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+from app.auth import verify_password, get_password_hash, create_access_token
+from app.core.dependencies import get_current_user
 
 router = APIRouter(tags=["用户"])
 
@@ -47,24 +45,6 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-# ========== 依赖 ==========
-
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="无效的Token")
-
-    username = payload.get("sub")
-    if not username:
-        raise HTTPException(status_code=401, detail="Token中无用户信息")
-
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    return user
 
 
 # ========== 路由 ==========

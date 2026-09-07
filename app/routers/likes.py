@@ -8,27 +8,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 from app.models import Like, Article, User
-from app.auth import decode_token
-from fastapi.security import OAuth2PasswordBearer
+from app.core.dependencies import get_current_user
 from app.core.cache import delete_cache, delete_cache_pattern
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
 router = APIRouter(prefix="/likes", tags=["点赞"])
-
-
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="无效的Token")
-
-    username = payload.get("sub")
-    user = db.query(User).filter(User.username == username).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    return user
-
 
 @router.post("/{article_id}")
 def like_article(
