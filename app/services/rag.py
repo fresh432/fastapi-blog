@@ -28,6 +28,7 @@ embeddings = DashScopeEmbeddings(
 _vectorstore = None
 _bm25 = None
 _all_chunks = []
+_upload_files = set()
 
 def get_vectorstore():
     """获取或创建向量库"""
@@ -53,15 +54,22 @@ def _build_bm25():
     tokenized_docs = [doc.split() for doc in documents]
     _bm25 = BM25Okapi(tokenized_docs)
 
-def process_document(file_path: str) -> int:
+def process_document(file_path: str, source: str = None) -> int:
     """
     处理文档: 加载 -> 切分 -> 存入向量库 + 重建BM25
     返回切分后的 chunk 数量
+    新增:
+    - source: 文档来源标识 (如文件名)
+    - 重复文件检查: 相同source不重复处理
     """
-    global _bm25
+    global _bm25, _upload_files
 
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"文件不存在: {file_path}")
+
+    doc_source = source or os.path.basename(file_path)
+    if doc_source in _upload_files:
+        return 0
 
     loader = TextLoader(file_path, encoding="utf-8")
     documents = loader.load()
@@ -76,6 +84,9 @@ def process_document(file_path: str) -> int:
     )
     chunks = splitter.split_documents(documents)
 
+    for chunk in chunks:
+        chunk.metadata["source"] = doc_source
+
     vectorstore = get_vectorstore()
     vectorstore.add_documents(chunks)
     vectorstore.persist()
@@ -83,6 +94,9 @@ def process_document(file_path: str) -> int:
     # 重建BM25索引
     _bm25 = None
     _build_bm25()
+
+    # 记录已上传
+    _upload_files.add(doc_source)
 
     return len(chunks)
 
@@ -104,7 +118,10 @@ def _reciprocal_rank_fusion(vector_results: List[str], keyword_results: List[str
     return [doc for doc, _ in sorted_docs]
 
 def hybrid_search(query: str, k: int = 3) -> List[str]:
-    """混合检索: 向量相似度 + BM25关键词, RRF融合重排序"""
+    """
+    混合检索: 向量相似度 + BM25关键词, RRF融合重排序
+    返回结果增加source字段
+    """
     # 向量检索
     vectorstore = get_vectorstore()
 
@@ -117,7 +134,7 @@ def hybrid_search(query: str, k: int = 3) -> List[str]:
         return []
 
     vector_docs = vectorstore.similarity_search(query, k=k*2)
-    vector_results = [doc.page_content for doc in vector_docs]
+    vector_results = [{"content": doc.page_content, "source": doc.metadata.get("source", "unknown")} for doc in vector_docs]
 
     # 关键词检索 (BM25)
     keyword_results = []
@@ -132,9 +149,34 @@ def hybrid_search(query: str, k: int = 3) -> List[str]:
         top_indices = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[:k*2]
 
         documents = _all_chunks.get("documents", []) if _all_chunks else []
-        keyword_results = [documents[i] for i in top_indices if i < len(documents)]
+        metadatas = _all_chunks.get("metadatas", []) if _all_chunks else []
+
+        keyword_results = [
+            {
+                "content": documents[i],
+                "source": metadatas[i].get("source", "unknown") if metadatas and i < len(metadatas) else "unknown"
+            }
+            for i in top_indices if i < len(documents)
+        ]
 
     # RRF融合
-    fused = _reciprocal_rank_fusion(vector_results, keyword_results)
+    fused = _reciprocal_rank_fusion(
+        [r["content"] for r in vector_results],
+        [r["content"] for r in keyword_results]
+    )
 
-    return fused[:k]
+    # 返回带source的结果（取前k个content，查找对应source）
+    final_results = []
+    seen = set()
+    for content in fused_contents[:k]:
+        if content not in seen:
+            seen.add(content)
+            # 查找source (优先从vector_results找)
+            source = "unknown"
+            for r in vector_results + keyword_results:
+                if r["content"] == content:
+                    source = r["source"]
+                    break
+            final_results.append({"content": content, "source": source})
+
+    return final_results

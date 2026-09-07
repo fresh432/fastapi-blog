@@ -247,6 +247,7 @@ async def ask_knowledge(
 ):
     """
     基于知识库问答（Hybrid Search），无相关文档时降级为直接LLM回答
+    返回结果增加source溯源
     """
     if not request.messages:
         raise HTTPException(status_code=400, detail="消息不能为空")
@@ -256,13 +257,20 @@ async def ask_knowledge(
 
     # 混合检索
     try:
-        contexts =hybrid_search(query, k=3)
+        results =hybrid_search(query, k=3)
     except Exception:
         raise HTTPException(status_code=500, detail="知识库检索失败")
 
-    # 构造 RAG Prompt
-    if contexts:
-        context_text = "\n\n".join(contexts)
+    # 构造 RAG Prompt (增加source标注)
+    if results:
+        contexts = []
+        sources = []
+        for r in results:
+            contexts.append(r["content"])
+            sources.append(r["source"])
+
+        context_text = "\n\n".join([f"[来自 {s}]\n{c}" for c, s in zip(contexts, sources)])
+
         prompt = f"""基于以下文档片段回答问题：
     
         {context_text}
