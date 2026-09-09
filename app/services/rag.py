@@ -89,7 +89,6 @@ def process_document(file_path: str, source: str = None) -> int:
 
     vectorstore = get_vectorstore()
     vectorstore.add_documents(chunks)
-    vectorstore.persist()
 
     # 重建BM25索引
     _bm25 = None
@@ -168,7 +167,7 @@ def hybrid_search(query: str, k: int = 3) -> List[str]:
     # 返回带source的结果（取前k个content，查找对应source）
     final_results = []
     seen = set()
-    for content in fused_contents[:k]:
+    for content in fused[:k]:
         if content not in seen:
             seen.add(content)
             # 查找source (优先从vector_results找)

@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.params import Depends
 from fastapi.responses import StreamingResponse
 from fastapi.concurrency import run_in_threadpool
-from langchain_classic.agents import initialize
 from openai import APIError, APITimeoutError
 import json
 import traceback

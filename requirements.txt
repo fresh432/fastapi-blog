@@ -5,7 +5,6 @@ pydantic==2.7.4
 bcrypt
 python-jose
 slowapi
-booktype
 celery
 python-dotenv
 redis>=5.0.0
