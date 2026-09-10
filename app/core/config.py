@@ -1,4 +1,6 @@
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
+from urllib.parse import quote_plus
 
 class Settings(BaseSettings):
     # 数据库 (原 database.py 中的环境变量)
@@ -32,21 +34,30 @@ class Settings(BaseSettings):
 
     @property
     def DATABASE_URL(self) -> str:
-        """动态拼接MySQL连接URL"""
-        return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+        """动态拼接MySQL连接URL（密码URL编码，兼容特殊字符）"""
+        return f"mysql+pymysql://{self.DB_USER}:{quote_plus(self.DB_PASSWORD)}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     @property
     def CELERY_BROKER_URL(self) -> str:
         """动态拼接Celery Broker"""
         if self.REDIS_PASSWORD:
-            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/1"
+            return f"redis://:{quote_plus(self.REDIS_PASSWORD)}@{self.REDIS_HOST}:{self.REDIS_PORT}/1"
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/1"
 
     @property
     def CELERY_RESULT_BACKEND(self) -> str:
         """动态拼接Celery Backend"""
         if self.REDIS_PASSWORD:
-            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/2"
+            return f"redis://:{quote_plus(self.REDIS_PASSWORD)}@{self.REDIS_HOST}:{self.REDIS_PORT}/2"
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/2"
+
+    @model_validator(mode='after')
+    def check_secret_key(self):
+        if self.SECRET_KEY == "your-secret-key-change-in-production":
+            raise ValueError(
+                "SECRET_KEY 不能为默认值！请在 .env 文件中设置安全的随机密钥，"
+                "例如：openssl rand -hex 32"
+            )
+        return self
 
 settings = Settings()
