@@ -6,12 +6,12 @@ from sqlalchemy import Column, Integer, String, Table, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database import Base
 
-# 多对多关联表
+# 多对多关联表（新增 ondelete="CASCADE"，删除文章/标签时自动清理关联记录）
 article_tag = Table(
     'article_tag',
     Base.metadata,
-    Column('article_id', Integer, ForeignKey('articles.id')),
-    Column('tag_id', Integer, ForeignKey('tags.id'))
+    Column('article_id', Integer, ForeignKey('articles.id', ondelete="CASCADE")),
+    Column('tag_id', Integer, ForeignKey('tags.id', ondelete="CASCADE"))
 )
 
 class Tag(Base):

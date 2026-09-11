@@ -28,5 +28,8 @@ class Article(Base):
     # 关联评论
     comments = relationship("Comment", back_populates="article", cascade="all, delete-orphan")
 
+    # 关联点赞
+    likes = relationship("Like", back_populates="article", cascade="all, delete-orphan")
+
     # 关联标签
     tags = relationship("Tag", secondary="article_tag", back_populates="articles")

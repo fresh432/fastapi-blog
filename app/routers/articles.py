@@ -285,6 +285,9 @@ def delete_article(
     db.delete(article)
     db.commit()
 
+    # 新增: 手动清理多对多标签关联 (兼容已有数据库, ORM 自动处理关联记录)
+    article.tags.clear()
+
     # 清除缓存
     delete_cache(f"fastapi:article:{article_id}")
     delete_cache_pattern("fastapi:articles:list:*")
