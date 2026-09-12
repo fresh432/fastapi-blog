@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Comment, Article, User
 from app.core.dependencies import get_current_user
+from app.core.cache import delete_cache, delete_cache_pattern
 
 router = APIRouter(prefix="/comments", tags=["评论"])
 
@@ -54,6 +55,10 @@ def create_comment(
     db.add(db_comment)
     db.commit()
     db.refresh(db_comment)
+
+    delete_cache(f"fastapi:article:{comment.article_id}")
+    delete_cache_pattern("fastapi:articles:list:*")
+
     return db_comment
 
 
@@ -71,8 +76,15 @@ def delete_comment(
     if comment.author != current_user.username:
         raise HTTPException(status_code=403, detail="无权删除他人评论")
 
+    # 保存文章ID用于后续清缓存
+    article_id = comment.article_id
+
     db.delete(comment)
     db.commit()
+
+    delete_cache(f"fastapi:article:{article_id}")
+    delete_cache_pattern("fastapi:articles:list:*")
+
     return {"message": "删除成功"}
 
 @router.get("/article/{article_id}")

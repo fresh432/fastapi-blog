@@ -42,6 +42,7 @@ class SummarizeResponse(BaseModel):
     summary: str = Field(..., description="文章摘要")
     keywords: List[str] = Field(..., description="关键词列表")
     category: Optional[str] = Field(default=None, description="推荐分类")
+    hallucination_warning: Optional[str] = Field(default=None, description="摘要可能包含原文未提及内容的警告")
 
 class AgentRequest(BaseModel):
     messages: List[ChatMessage] = Field(..., description="对话消息列表")

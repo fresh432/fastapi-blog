@@ -30,6 +30,23 @@ _bm25 = None
 _all_chunks = []
 _upload_files = set()
 
+def _load_uploaded_sources():
+    """
+    从 Chroma 现有 metadata 加载已上传文件 source 列表
+    解决进程重启后 _uploaded_files 内存集合丢失的问题
+    """
+    global _upload_files
+    vectorstore = get_vectorstore()
+    try:
+        data = vectorstore.get()
+        metadatas = data.get("metadatas", []) if data else []
+        for meta in metadatas:
+            if meta and "source" in meta:
+                _upload_files.add(meta["source"])
+    except Exception:
+        pass
+
+
 def get_vectorstore():
     """获取或创建向量库"""
     global _vectorstore
@@ -38,6 +55,9 @@ def get_vectorstore():
             persist_directory=CHROMA_DIR,
             embedding_function=embeddings,
         )
+        # 启动时重建已上传文件集合
+        _load_uploaded_sources()
+
     return _vectorstore
 
 def _build_bm25():
