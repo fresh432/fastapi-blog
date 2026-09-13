@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     @property
     def DATABASE_URL(self) -> str:
         """动态拼接MySQL连接URL（密码URL编码，兼容特殊字符）"""
+        import os
+        if os.environ.get("TESTING") == "1":
+            return "sqlite:///./test.db"
         return f"mysql+pymysql://{self.DB_USER}:{quote_plus(self.DB_PASSWORD)}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     @property
