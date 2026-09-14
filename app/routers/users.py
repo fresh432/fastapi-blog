@@ -12,8 +12,52 @@ from app.database import get_db
 from app.models import User
 from app.auth import verify_password, get_password_hash, create_access_token
 from app.core.dependencies import get_current_user
+from app.core.cache import redis_client
+
+import logging
 
 router = APIRouter(tags=["用户"])
+
+logger = logging.getLogger(__name__)
+
+# ========== 登录防爆破 ==========
+LOGIN_MAX_FAILS = 5         # 最大连接失败次数
+LOGIN_LOCK_SECONDS = 600    # 锁定时长: 10分钟
+
+def _login_fail_key(username: str) -> str:
+    return f"login:fail:{username}"
+
+def _login_lock_key(username: str) -> str:
+    return f"login:lock:{username}"
+
+def _check_login_locked(username: str) -> bool:
+    """检查账号是否被锁定 (Redis异常时降级放行, 不阻塞正常登录)"""
+    try:
+        return redis_client.get(_login_lock_key(username)) is not None
+    except Exception as e:
+        logger.warning(f"登录锁定检查失败(Redis异常), 降级放行: {e}")
+        return False
+
+def _record_login_fail(username: str):
+    """记录登录失败, 连续失败5次锁定10分钟 (Redis异常时静默跳过)"""
+    try:
+        fail_key = _login_fail_key(username)
+        fails = redis_client.incr(fail_key)
+        if fails == 1:
+            redis_client.expire(fail_key, LOGIN_LOCK_SECONDS)
+        if fails >= LOGIN_MAX_FAILS:
+            redis_client.setex(_login_lock_key(username), LOGIN_LOCK_SECONDS, "1")
+            redis_client.delete(fail_key)
+            logger.warning(f"用户 {username} 连续登录失败{LOGIN_MAX_FAILS}次, 账号锁定10分钟")
+    except Exception as e:
+        logger.warning(f"登录失败计数异常(Redis异常), 跳过计数: {e}")
+
+def _clear_login_fail(username: str):
+    """登录成功后清除失败计数"""
+    try:
+        redis_client.delete(_login_fail_key(username))
+    except Exception:
+        pass
 
 # ========== Pydantic 模型 ==========
 
@@ -55,6 +99,10 @@ def login_for_access_token(
         db: Session = Depends(get_db)
 ):
     """OAuth2标准登录"""
+    # 放爆破: 锁定中的账号直接拒绝
+    if _check_login_locked(form_data.username):
+        raise HTTPException(status_code=429, detail="登录失败次数过多, 账号已锁定10分钟")
+
     user = db.query(User).filter(User.username == form_data.username).first()
 
     if not user or not verify_password(form_data.password, user.password):
@@ -64,6 +112,7 @@ def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    _clear_login_fail(form_data.username)
     access_token = create_access_token(data={"sub": user.username})
     return {
         "access_token": access_token,
@@ -97,11 +146,16 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 @router.post("/login")
 def login(user: UserCreate, db: Session = Depends(get_db)):
     """用户登录（JSON格式）"""
+    # 放爆破: 锁定中的账号直接拒绝
+    if _check_login_locked(user.username):
+        raise HTTPException(status_code=429, detail="登录失败次数过多, 账号已锁定10分钟")
     db_user = db.query(User).filter(User.username == user.username).first()
 
     if not db_user or not verify_password(user.password, db_user.password):
+        _record_login_fail(user.username)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
+    _clear_login_fail(user.username)
     access_token = create_access_token(data={"sub": db_user.username})
     return {
         "access_token": access_token,
