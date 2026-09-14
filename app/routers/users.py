@@ -84,8 +84,12 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_user)
 
-    # 异步发送欢迎邮件
-    send_welcome_email.delay(db_user.username)
+    # 异步发送欢迎邮件 (非核心路径, Celery/Redis不可用时降级, 不影响注册)
+    try:
+        send_welcome_email.delay(db_user.username)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"欢迎邮件任务发送失败, 用户ID: {db_user.id}, 已降级跳过: {e}")
 
     return db_user
 
