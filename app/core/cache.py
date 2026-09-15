@@ -6,6 +6,8 @@ import redis
 import json
 import random
 from typing import Optional, Any
+from redis.retry import Retry
+from redis.backoff import ExponentialWithJitterBackoff
 
 from app.core.config import settings
 
@@ -15,7 +17,11 @@ redis_client = redis.Redis(
     port=settings.REDIS_PORT,
     password=settings.REDIS_PASSWORD,
     db=settings.REDIS_DB,
-    decode_responses=True
+    decode_responses=True,
+    socket_timeout=3,           # 读写超时, 防止socket层无限等待
+    socket_connect_timeout=3,   # 连接超时, Redis宕机时快速失败
+    # 缓存/登录锁定属快速路径, 失败应立刻抛异常走降级, 不应原地退避等待
+    retry=Retry(ExponentialWithJitterBackoff(base=0.5, cap=2), retries=0),
 )
 
 def get_cache(key: str) -> Optional[str]:
