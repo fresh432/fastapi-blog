@@ -30,10 +30,10 @@ celery_app.conf.update(
     enable_utc=True,
     # Redis宕机时快速失败, 由调用方try/except降级, 不阻塞请求线程
     broker_connection_timeout=2,        # 连接broker超时2秒
-    broker_connection_max_retries=0,    # 连接失败不重试(kombu默认递增高频重试, 可阻塞数分钟)
-    broker_publish_retry=False,         # 发布失败不自动重试, 立即抛异常
+    broker_connection_max_retries=1,    # 连接失败不重试(kombu默认递增高频重试, 可阻塞数分钟)
     broker_transport_options={          # kombu传输层(Redis)socket超时
         "socket_connect_timeout": 2,
         "socket_timeout": 2,
-    }
+    },
+    task_publish_retry=False,           # 发布失败不自动重试, 立即抛异常
 )

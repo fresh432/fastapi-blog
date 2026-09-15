@@ -22,7 +22,7 @@ router = APIRouter(tags=["用户"])
 logger = logging.getLogger(__name__)
 
 # ========== 登录防爆破 ==========
-LOGIN_MAX_FAILS = 5         # 最大连接失败次数
+LOGIN_MAX_FAILS = 5         # 最大登录失败次数
 LOGIN_LOCK_SECONDS = 600    # 锁定时长: 10分钟
 
 # 进程内降级存储 (Redis不可用时兜底; 多进程部署下不共享)
@@ -131,6 +131,7 @@ def login_for_access_token(
     user = db.query(User).filter(User.username == form_data.username).first()
 
     if not user or not verify_password(form_data.password, user.password):
+        _record_login_fail(form_data.username)
         raise HTTPException(
             status_code=401,
             detail="用户名或密码错误",
@@ -162,7 +163,6 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     try:
         send_welcome_email.delay(db_user.username)
     except Exception as e:
-        import logging
         logging.getLogger(__name__).warning(f"欢迎邮件任务发送失败, 用户ID: {db_user.id}, 已降级跳过: {e}")
 
     return db_user
