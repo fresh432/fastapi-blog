@@ -15,6 +15,7 @@ from app.core.dependencies import get_current_user
 from app.core.cache import redis_client
 
 import logging
+import time
 
 router = APIRouter(tags=["用户"])
 
@@ -24,6 +25,10 @@ logger = logging.getLogger(__name__)
 LOGIN_MAX_FAILS = 5         # 最大连接失败次数
 LOGIN_LOCK_SECONDS = 600    # 锁定时长: 10分钟
 
+# 进程内降级存储 (Redis不可用时兜底; 多进程部署下不共享)
+_local_locks: dict = {} # username -> 锁定截止时间戳
+_local_fails: dict = {} # username -> (失败次数, 首次失败时间戳)
+
 def _login_fail_key(username: str) -> str:
     return f"login:fail:{username}"
 
@@ -31,29 +36,49 @@ def _login_lock_key(username: str) -> str:
     return f"login:lock:{username}"
 
 def _check_login_locked(username: str) -> bool:
-    """检查账号是否被锁定 (Redis异常时降级放行, 不阻塞正常登录)"""
+    """检查账号是否被锁定 (Redis异常时查进程内兜底, 防止锁定被绕过)"""
     try:
         return redis_client.get(_login_lock_key(username)) is not None
     except Exception as e:
-        logger.warning(f"登录锁定检查失败(Redis异常), 降级放行: {e}")
+        logger.warning(f"登录锁定检查失败(Redis异常), 使用进程内兜底: {e}")
+        deadline = _local_locks.get(username)
+        if deadline is None:
+            return False
+        if time.time() < deadline:
+            return True
+        del _local_locks[username]  # 锁定已过期, 清除
         return False
 
 def _record_login_fail(username: str):
-    """记录登录失败, 连续失败5次锁定10分钟 (Redis异常时静默跳过)"""
+    """记录登录失败, 连续失败5次锁定10分钟 (Redis异常时写入进程内兜底)"""
     try:
+        now = time.time()
         fail_key = _login_fail_key(username)
         fails = redis_client.incr(fail_key)
         if fails == 1:
             redis_client.expire(fail_key, LOGIN_LOCK_SECONDS)
         if fails >= LOGIN_MAX_FAILS:
             redis_client.setex(_login_lock_key(username), LOGIN_LOCK_SECONDS, "1")
+            _local_locks[username] = now + LOGIN_LOCK_SECONDS
             redis_client.delete(fail_key)
             logger.warning(f"用户 {username} 连续登录失败{LOGIN_MAX_FAILS}次, 账号锁定10分钟")
     except Exception as e:
-        logger.warning(f"登录失败计数异常(Redis异常), 跳过计数: {e}")
+        logger.warning(f"登录失败计数异常(Redis异常), 使用进程内兜底: {e}")
+        now = time.time()
+        fails, first_at = _local_fails.get(username, (0, now))
+        if now - first_at > LOGIN_LOCK_SECONDS: # 计数窗口过期, 重新计
+            fails, first_at = 0, now
+        fails += 1
+        if fails >= LOGIN_MAX_FAILS:
+            _local_locks[username] = now + LOGIN_LOCK_SECONDS
+            _local_fails.pop(username, None)
+            logger.warning(f"用户 {username} 连续登录失败{LOGIN_MAX_FAILS}次, 账号锁定10分钟(进程内)")
+        else:
+            _local_fails[username] = (fails, first_at)
 
 def _clear_login_fail(username: str):
-    """登录成功后清除失败计数"""
+    """登录成功后清除失败计数 (进程内和Redis都清)"""
+    _local_fails.pop(username, None)
     try:
         redis_client.delete(_login_fail_key(username))
     except Exception:
