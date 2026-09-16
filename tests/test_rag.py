@@ -28,6 +28,7 @@ class TestBM25Chinese:
     DOCS = [
         "Redis缓存穿透可以使用布隆过滤器解决",
         "今天天气真不错适合出去散步",
+        "数据库索引优化是后端面试的高频考点",
     ]
 
     def test_bm25_hit_after_jieba(self):
