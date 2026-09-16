@@ -3,6 +3,8 @@ RAG 核心服务：混合检索（向量 + 关键词 BM25）
 """
 
 import os
+import jieba
+
 from typing import List
 from collections import defaultdict
 
@@ -29,6 +31,14 @@ _vectorstore = None
 _bm25 = None
 _all_chunks = []
 _upload_files = set()
+
+def _tokenize(text: str) -> List[str]:
+    """
+    统一分词: jieba中文分词 + 过滤空白符
+    建索引(_build_bm25)和查询(hybrid_search)必须使用同一分词方式,
+    否则索引和查询的"词"对不上, BM25失效
+    """
+    return [w for w in jieba.lcut(text) if w.strip()]
 
 def _load_uploaded_sources():
     """
@@ -71,7 +81,7 @@ def _build_bm25():
         return
 
     documents = _all_chunks.get("documents", []) if _all_chunks else []
-    tokenized_docs = [doc.split() for doc in documents]
+    tokenized_docs = [_tokenize(doc) for doc in documents]
     _bm25 = BM25Okapi(tokenized_docs)
 
 def process_document(file_path: str, source: str = None) -> int:
@@ -161,7 +171,7 @@ def hybrid_search(query: str, k: int = 3) -> List[str]:
         _build_bm25()
 
     if _bm25:
-        tokenized_query = query.split()
+        tokenized_query = _tokenize(query)
         bm25_scores = _bm25.get_scores(tokenized_query)
 
         # 获取top-k索引
