@@ -11,9 +11,12 @@ FastAPI 博客系统 - 主入口（路由拆分版）
 
 from fastapi import FastAPI, Request
 from slowapi import _rate_limit_exceeded_handler
-from app.core.limiter import limiter
 from slowapi.errors import RateLimitExceeded
+from app.core.limiter import limiter
 from app.database import engine, Base
+from contextlib import asynccontextmanager
+
+import os
 
 # 导入路由
 from app.routers import articles, categories, users, comments, tags, likes, ai
@@ -21,11 +24,64 @@ from app.routers import articles, categories, users, comments, tags, likes, ai
 # 建表
 Base.metadata.create_all(bind=engine)
 
+from app.database import SessionLocal
+from app.models import Article
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    db = SessionLocal()
+    try:
+        # 1. 测试数据 (仅 SEED_TEST_DATA=true 且空表时注入, 默认不注入假数据)
+        if os.environ.get("SEED_TEST_DATA") == "true" and db.query(Article).count() == 0:
+            test_articles = [
+                Article(title="第一篇", content="Hello FastAPI", author="fresh432"),
+                Article(title="第二篇", content="学习笔记", author="fresh432")
+            ]
+            for article in test_articles:
+                db.add(article)
+            db.commit()
+            logger.info("SEED_TEST_DATA=true, 已注入测试数据")
+
+        # 2. 缓存预热
+        try:
+            from app.core.cache import set_cache
+
+            hot_articles = db.query(Article).filter(
+                Article.status == "published"
+            ).order_by(Article.created_at.desc()).limit(20).all()
+
+            for article in hot_articles:
+                cache_key = f"fastapi:article:{article.id}"
+                result = {
+                    "id": article.id,
+                    "title": article.title,
+                    "content": article.content,
+                    "author": article.author,
+                    "category_id": article.category_id,
+                    "status": article.status,
+                    "created_at": article.created_at.isoformat() if article.created_at else None
+                }
+                set_cache(cache_key, json.dumps(result), base_expire=600)
+            logger.info(f"缓存预热完成, 共{len(hot_articles)}篇")
+        except Exception as e:
+            logger.warning(f"缓存预热失败(Redis可能不可用), 已跳过, 不影响启动: {e}")
+    finally:
+        db.close()
+
+    yield
+    # 关闭逻辑: 当前无资源需释放, 预留给未来 (如连接池清理)
+
 # 创建 FastAPI 实例
 app = FastAPI(
     title="个人博客系统",
     description="学习 FastAPI 的后端项目（路由拆分版）",
-    version="0.2.0"
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
 # 注册限流器
@@ -47,45 +103,3 @@ def read_root():
     return {"message": "个人博客系统", "docs": "/docs"}
 
 
-# ========== 启动时添加测试数据 + 缓存预热 ==========
-
-from app.database import SessionLocal
-from app.models import Article
-import json
-
-@app.on_event("startup")
-def init_data():
-    """启动时添加测试数据"""
-    db = SessionLocal()
-    try:
-        # 1. 测试数据 (仅空表时添加)
-        if db.query(Article).count() == 0:
-            test_articles = [
-                Article(title="第一篇", content="Hello FastAPI", author="fresh432"),
-                Article(title="第二篇", content="学习笔记", author="fresh432")
-            ]
-            for article in test_articles:
-                db.add(article)
-            db.commit()
-
-        # 2. 缓存预热: 加载热门文章到Redis
-        from app.core.cache import set_cache
-
-        hot_articles = db.query(Article).filter(
-            Article.status == "published"
-        ).order_by(Article.created_at.desc()).limit(20).all()
-
-        for article in hot_articles:
-            cache_key = f"fastapi:article:{article.id}"
-            result = {
-                "id": article.id,
-                "title": article.title,
-                "content": article.content,
-                "author": article.author,
-                "category_id": article.category_id,
-                "status": article.status,
-                "created_at": article.created_at.isoformat() if article.created_at else None
-            }
-            set_cache(cache_key, json.dumps(result), base_expire=600)
-    finally:
-        db.close()
