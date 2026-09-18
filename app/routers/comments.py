@@ -94,7 +94,7 @@ def get_article_comments(
     limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
-    """"获取文章评论 (支持分页) """
+    """获取文章评论 (支持分页) """
     comments = db.query(Comment).filter(Comment.article_id == article_id).offset(skip).limit(limit).all()
     total = db.query(Comment).filter(Comment.article_id == article_id).count()
 

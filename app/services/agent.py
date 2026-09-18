@@ -141,27 +141,6 @@ builder.add_edge("tools", "agent")
 graph = builder.compile()
 
 
-def run_agent(messages: list) -> str:
-    """
-    运行 Agent，返回最终回复（带异常捕获 + 迭代限制）
-    """
-    try:
-        # 限制消息长度, 防止token爆炸
-        if len(messages) > 50:
-            messages = messages[-50:]
-            logger.warning("消息历史超过50条, 已截断")
-
-        result = graph.invoke({
-            "messages": messages,
-            "iteration_count": 0
-        })
-        last_msg = result["messages"][-1]
-        return last_msg.content if hasattr(last_msg, "content") else str(last_msg)
-
-    except Exception as e:
-        logger.error(f"Agent执行失败: {e}")
-        return "抱歉,服务暂时不可用,请稍后重试."
-
 
 
 

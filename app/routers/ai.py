@@ -12,7 +12,7 @@ import asyncio
 import copy
 
 from app.services.agent_memory import save_memory, load_memory, clear_memory
-from app.services.agent import run_agent, graph
+from app.services.agent import graph
 from app.services.rag import process_document, hybrid_search, UPLOAD_DIR
 from app.schemas.ai import ChatRequest, ChatResponse, SummarizeResponse, SummarizeRequest, AgentRequest, AgentResponse
 from app.services.llm import get_llm_client
@@ -362,23 +362,6 @@ async def agent_chat(
         raise HTTPException(status_code=504, detail="Agent执行超时, 请简化问题后重试")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent 执行失败: {e}")
-
-def _agent_stream_generator(messages: list):
-    """Agent 流式生成器"""
-    initial_state = {"messages": messages}
-
-    for event in graph.stream(initial_state, stream_mode="values"):
-        last_msg = event["messages"][-1]
-
-        # 工具调用
-        if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-            for tc in last_msg.tool_calls:
-                yield f"data: [调用工具] {tc['name']}({tc['args']})\n\n"
-
-        elif hasattr(last_msg, "content") and last_msg.content:
-            yield f"data: {last_msg.content}\n\n"
-
-    yield "data: [DONE]\n\n"
 
 @router.post("/agent/stream")
 async def agent_chat_stream(
