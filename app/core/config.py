@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: int = 30
     QW_API_KEY: str = ""
 
+    SEED_TEST_DATA: bool = False
+
     class Config:
         env_file = ".env"
         case_sensitive = True

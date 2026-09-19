@@ -13,10 +13,9 @@ from fastapi import FastAPI, Request
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from app.core.limiter import limiter
+from app.core.config import settings
 from app.database import engine, Base
 from contextlib import asynccontextmanager
-
-import os
 
 # 导入路由
 from app.routers import articles, categories, users, comments, tags, likes, ai
@@ -37,7 +36,7 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         # 1. 测试数据 (仅 SEED_TEST_DATA=true 且空表时注入, 默认不注入假数据)
-        if os.environ.get("SEED_TEST_DATA") == "true" and db.query(Article).count() == 0:
+        if settings.SEED_TEST_DATA and db.query(Article).count() == 0:
             test_articles = [
                 Article(title="第一篇", content="Hello FastAPI", author="fresh432"),
                 Article(title="第二篇", content="学习笔记", author="fresh432")
