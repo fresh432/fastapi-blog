@@ -1,13 +1,27 @@
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-.env
+# 版本控制
 .git
 .gitignore
-README.md
+
+# 环境变量 (防泄密)
+.env
+
+# 数据目录 (运行时生成, 不应打进镜像)
+chroma_db/
+uploads/
+logs/
+*.db
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# 测试与文档 (生产镜像不需要)
 tests/
-blog.db
+docs/
+
+# 本地环境
+.venv/
+venv/
+.env.example
