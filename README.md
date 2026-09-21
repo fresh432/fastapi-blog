@@ -77,6 +77,9 @@ QW_API_KEY=your-qwen-api-key
 # 安装依赖
 pip install -r requirements.txt
 
+# 开发环境（含测试依赖）:
+pip install -r requirements-dev.txt
+
 # 启动服务
 uvicorn app.main:app --reload
 
