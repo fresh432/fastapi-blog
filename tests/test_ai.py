@@ -30,23 +30,6 @@ def mock_llm(monkeypatch):
 
     monkeypatch.setattr("app.routers.ai.get_llm_client", mock_get_llm_client)
 
-@pytest.fixture(autouse=True)
-def mock_redis(monkeypatch):
-    """
-    Mock Redis 客户端, 避免连接真实Redis
-    autouse=True: 所有AI测试自动生效, 无需显示声明
-    """
-    mock_client = MagicMock()
-    mock_client.get.return_value = None
-    mock_client.setex.return_value = True
-    mock_client.delete.return_value = True
-    mock_client.scan_iter.return_value = []
-
-    # 覆盖所有使用 redis_client 的地方
-    monkeypatch.setattr("app.core.cache.redis_client", mock_client)
-    monkeypatch.setattr("app.services.agent_memory.redis_client", mock_client)
-    monkeypatch.setattr("app.services.chat_history.redis_client", mock_client)
-
 @pytest.fixture
 def auth_headers(client):
     client.post("/register", json={"username": "testuser", "password": "testpass123"})
