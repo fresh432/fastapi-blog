@@ -1,7 +1,5 @@
 """
 缓存测试: 命中/未命中/失效
-注意: mock的是app.core.cache.redis_client, 因为cache模块内的函数
-(get_cache/set_cache/delete_cache)在调用时才读取这个模块级全局变量
 """
 
 import json
@@ -33,7 +31,7 @@ class TestArticleCache:
         assert r.json()["title"] == "来自缓存的假标题"  # 证明走了缓存路径
 
     def test_cache_invalidate_on_update(self, client, auth_headers, mock_cache_redis):
-        """更新文章后混村被删除 (delete被调用, key正确)"""
+        """更新文章后缓存被删除 (delete被调用, key正确)"""
         r = client.post("/articles", json={"title": "缓存测试", "content": "内容"}, headers=auth_headers)
         article_id = r.json()["id"]
 

@@ -30,12 +30,6 @@ def mock_llm(monkeypatch):
 
     monkeypatch.setattr("app.routers.ai.get_llm_client", mock_get_llm_client)
 
-@pytest.fixture
-def auth_headers(client):
-    client.post("/register", json={"username": "testuser", "password": "testpass123"})
-    r = client.post("/login", json={"username": "testuser", "password": "testpass123"})
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
-
 class TestAISummarize:
     """文章摘要接口测试"""
 

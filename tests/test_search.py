@@ -35,7 +35,7 @@ class TestSearchPagination:
         """前缀匹配生效: 匹配标题前缀, 不匹配中间字"""
         client.post("/articles", json={"title": "Redis入门", "content": "内容"}, headers=auth_headers)
 
-        r1 = client.get("articles/search?q=Redis")
+        r1 = client.get("/articles/search?q=Redis")
         assert r1.json()["total"] == 1
-        r2 = client.get("articles/search?q=Python入门")
+        r2 = client.get("/articles/search?q=Python入门")
         assert r2.json()["total"] == 0

@@ -29,7 +29,7 @@ class TestLikeIdempotent:
         r = client.post("/articles", json={"title": "点赞测试", "content": "内容"}, headers=auth_headers)
         article_id = r.json()["id"]
 
-        client.post(f"likes/{article_id}", headers=auth_headers)
+        client.post(f"/likes/{article_id}", headers=auth_headers)
         r = client.delete(f"likes/{article_id}", headers=auth_headers)
         assert r.status_code == 200
         assert r.json()["likes_count"] == 0
