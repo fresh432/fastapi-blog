@@ -376,6 +376,22 @@ alembic upgrade head
 6. **双层限流**：Nginx 网关层限流（防 DDoS）+ slowapi 应用层限流（防业务滥用），详见「双层限流策略」章节
 7. **CDN 预留**：静态资源（头像/文档）未来可接入 CDN，当前通过 Nginx 本地服务，架构已预留切换路径
 
+## 已知边界
+
+以下边界均为 14 天修复计划执行过程中逐条确认过的真实设计取舍——知道边界在哪，是评估下一步演进的前提。
+
+1. **【缓存】延迟双删存在毫秒级读窗口**：更新走"删缓存 → 写库 → Celery 延迟二次删除"，延迟间隔内若有读请求回源旧数据并回填，可能读到旧值。窗口已压缩至极小但无法绝对消除；彻底方案是 Canal/binlog 订阅或分布式锁，评估成本后暂不引入。
+
+2. **【检索】BM25 半边已接 jieba 分词，语义半边依赖 Embedding 模型质量**：`split()` 整句一词导致的 TF/IDF 失真已修复（建索引与查询共用 `_tokenize`），但向量半边无兜底，Embedding 模型质量直接决定语义检索上限。
+
+3. **【Agent】记忆不含完整工具记录，跨 thread 上下文有限**：tool 结果仅保留 500 字摘要（防工具输出撑爆 4000 Token 上限），完整输出不可恢复；记忆按 thread 隔离，跨 thread 不共享。
+
+4. **【安全】登录锁定的进程内兜底多进程不共享**：Redis（INCR + TTL）为主存储，Redis 异常时降级到进程内 `_local_locks/_local_fails`，保证不 fail-open、登录不阻塞。但进程内兜底属单进程——多实例部署下各实例独立计数（每实例各 5 次）。取舍：优先保证 Redis 故障时安全机制不失效，共享化留待演进。
+
+5. **【异步】Celery 发布快速失败依赖组合配置**：`broker_connection_timeout=2` + `broker_connection_max_retries=1` + `task_publish_retry=False`（另有 transport socket 超时 2s）共同保证 Redis 故障时发布 2 秒内快速失败。注意 `broker_connection_max_retries=0` 语义是**无限重试**而非不重试；`broker_publish_retry` 是无效配置项会被静默忽略——改动任一项即退回 kombu 默认递增长重试（阻塞数分钟）。
+
+6. **【数据】测试数据仅显式开关注入**：仅 `SEED_TEST_DATA=true` 且文章表为空时注入测试数据，生产默认空表。全新部署无初始数据属预期行为，演示/联调需显式开启。
+
 ## 许可证
 
 本项目仅供学习和交流，采用 CC BY-NC 4.0 协议，禁止任何商业用途。
