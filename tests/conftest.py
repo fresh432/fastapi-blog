@@ -20,6 +20,7 @@ def mock_cache_redis(monkeypatch):
     mock = MagicMock()
     mock.get.return_value = None
     mock.scan_iter.return_value = iter([])
+    monkeypatch.setattr(redis_client, "ping", mock.ping)
     monkeypatch.setattr(redis_client, "get", mock.get)
     monkeypatch.setattr(redis_client, "setex", mock.setex)
     monkeypatch.setattr(redis_client, "set", mock.set)

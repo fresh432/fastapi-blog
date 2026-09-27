@@ -9,7 +9,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 
-from app.tasks import count_article_views, delete_cache_delayed
+from app.tasks import count_article_views, delete_cache_delayed, safe_delay
 from app.database import get_db
 from app.models import Article, Category, Comment, User, Like
 from app.core.limiter import limiter
@@ -109,8 +109,8 @@ def create_article(
     # 清除文章列表缓存
     delete_cache_pattern("fastapi:articles:list:*")
 
-    # 异步触发阅读量统计 (初始化)
-    count_article_views.delay(db_article.id)
+    # 异步触发阅读量统计 (初始化, Redis/Celery不可用时safe_delay降级)
+    safe_delay(count_article_views, db_article.id)
 
     return db_article
 
@@ -259,10 +259,11 @@ def update_article(
     delete_cache_pattern("fastapi:articles:list:*")
 
     # 延迟双删：Celery异步执行，不阻塞请求
-    delete_cache_delayed.delay(
+    safe_delay(
+        delete_cache_delayed,
         f"fastapi:article:{article_id}",
         "fastapi:articles:list:*",
-        delay=2
+        countdown=2
     )
 
     return db_article
@@ -285,18 +286,18 @@ def delete_article(
     db.delete(article)
     db.commit()
 
-    # 新增: 手动清理多对多标签关联 (兼容已有数据库, ORM 自动处理关联记录)
-    article.tags.clear()
+    # 标签关联行由ORM secondary默认行为随删除自动清理, DB层另有ondelete="CASCADE"双保险, 无需手动clear
 
     # 清除缓存
     delete_cache(f"fastapi:article:{article_id}")
     delete_cache_pattern("fastapi:articles:list:*")
 
     # 延迟双删：Celery异步执行
-    delete_cache_delayed.delay(
+    safe_delay(
+        delete_cache_delayed,
         f"fastapi:article:{article_id}",
         "fastapi:articles:list:*",
-        delay=2
+        countdown=2
     )
 
     return {"message": "删除成功"}

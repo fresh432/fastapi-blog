@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 
-from app.tasks import send_welcome_email
+from app.tasks import send_welcome_email, safe_delay
 from app.database import get_db
 from app.models import User
 from app.auth import verify_password, get_password_hash, create_access_token
@@ -160,10 +160,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.refresh(db_user)
 
     # 异步发送欢迎邮件 (非核心路径, Celery/Redis不可用时降级, 不影响注册)
-    try:
-        send_welcome_email.delay(db_user.username)
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"欢迎邮件任务发送失败, 用户ID: {db_user.id}, 已降级跳过: {e}")
+    safe_delay(send_welcome_email, db_user.username)
 
     return db_user
 
