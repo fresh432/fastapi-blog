@@ -47,9 +47,15 @@ async def lifespan(app: FastAPI):
             logger.info("SEED_TEST_DATA=true, 已注入测试数据")
 
         # 2. 缓存预热
-        try:
-            from app.core.cache import set_cache
 
+        from app.core.cache import set_cache, redis_client
+        # 2.1 先探测Redis可用性: 不可用则整体跳过预热,
+        # 避免每篇文章各卡3秒连接超时(故障放大 3s×N)
+        try:
+            redis_client.ping()
+        except Exception as e:
+            logger.warning(f"Redis不可用, 跳过启动缓存预热(运行期缓存将懒加载): {e}")
+        else:
             hot_articles = db.query(Article).filter(
                 Article.status == "published"
             ).order_by(Article.created_at.desc()).limit(20).all()
@@ -67,8 +73,6 @@ async def lifespan(app: FastAPI):
                 }
                 set_cache(cache_key, json.dumps(result), base_expire=600)
             logger.info(f"缓存预热完成, 共{len(hot_articles)}篇")
-        except Exception as e:
-            logger.warning(f"缓存预热失败(Redis可能不可用), 已跳过, 不影响启动: {e}")
     finally:
         db.close()
 
