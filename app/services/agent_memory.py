@@ -16,6 +16,7 @@ MAX_TOKENS = 4000   # Agent 上下文更宽, Token 上限更高
 
 def _estimate_tokens(text: str) -> int:
     """粗略估算 Token 数 (同 chat_history.py) """
+    text = text or ""
     chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
     english_words = len([w for w in text.split() if w.isascii()])
     return chinese_chars + int(english_words * 1.5)
@@ -120,9 +121,12 @@ def save_memory(thread_id: str, messages:list):
         # 截断可能再次切断tool对, 收尾再清洗一次
         history = _sanitize_history(history)
 
-        redis_client.setex(key, TTL_SECONDS, json.dumps(history))
+        try:
+            redis_client.setex(key, TTL_SECONDS, json.dumps(history))
+        except Exception as e:
+            logger.warning(f"保存Agent记忆失败(已降级, 本次不持久化): thread={thread_id}, 原因: {e}")
     except Exception as e:
-        logger.error(f"保存Agent记忆失败: {e}")
+        logger.error(f"保存Agent记忆本地处理异常(已降级, 本次不持久化): thread={thread_id}, 原因: {e}")
 
 def load_memory(thread_id: str) -> List[Dict[str, str]]:
     """从 Redis 加载 Agent 对话状态 (重放前清洗不完整tool对) """
@@ -132,7 +136,7 @@ def load_memory(thread_id: str) -> List[Dict[str, str]]:
         if data:
             return _sanitize_history(json.loads(data))
     except Exception as e:
-        logger.error(f"加载Agent记忆失败: {e}")
+        logger.warning(f"加载Agent记忆失败(降级为空记忆): thread={thread_id}, 原因: {e}")
     return []
 
 def clear_memory(thread_id: str):
@@ -141,4 +145,4 @@ def clear_memory(thread_id: str):
         key = AGENT_MEMORY_KEY.format(thread_id=thread_id)
         redis_client.delete(key)
     except Exception as e:
-        logger.error(f"清空Agent记忆失败: {e}")
+        logger.warning(f"清空Agent记忆失败(已降级, 跳过): thread={thread_id}, 原因: {e}")

@@ -1,6 +1,9 @@
 import json
+import logging
 from typing import List, Dict
 from app.core.cache import redis_client # 复用现有 Redis 客户端
+
+logger = logging.getLogger(__name__)
 
 CHAT_HISTORY_KEY = "chat:history:{user_id}"
 MAX_HISTORY_ROUNDS = 10 # 保留最近 10 轮
@@ -14,6 +17,7 @@ def _estimate_tokens(text: str) -> int:
     - 英文字符: 按空格分词后 * 1.5
     - 标点符号: 忽略或按字符计
     """
+    text = text or ""
     chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
     english_words = len([w for w in text.split() if w.isascii()])
     return chinese_chars + int(english_words * 1.5)
@@ -28,12 +32,16 @@ def _estimate_messages_tokens(messages: List[Dict[str, str]]) -> int:
     return total
 
 def get_history(user_id: str) -> List[Dict[str, str]]:
-    """获取用户对话历史"""
+    """获取用户对话历史, Redis故障或数据损坏时降级为空历史, 不影响对话"""
     key = CHAT_HISTORY_KEY.format(user_id=user_id)
-    data = redis_client.get(key)
-    if data:
-        return json.loads(data)
-    return []
+    try:
+        data = redis_client.get(key)
+        if data:
+            return json.loads(data)
+        return []
+    except Exception as e:
+        logger.warning(f"对话历史加载失败(降级为空历史): user_id={user_id}, 原因: {e}")
+        return []
 
 def add_to_history(user_id: str, role: str, content: str):
     """添加消息到历史"""
@@ -58,9 +66,15 @@ def add_to_history(user_id: str, role: str, content: str):
     if len(history) > MAX_HISTORY_ROUNDS * 2:
         history = history[-MAX_HISTORY_ROUNDS * 2:]
 
-    redis_client.setex(key, TTL_SECONDS, json.dumps(history))
+    try:
+        redis_client.setex(key, TTL_SECONDS, json.dumps(history))
+    except Exception as e:
+        logger.warning(f"对话历史添加失败(已降级, 本次对话不使用历史): user_id={user_id}, 原因: {e}")
 
 def clear_history(user_id: str):
     """清空对话历史"""
     key = CHAT_HISTORY_KEY.format(user_id=user_id)
-    redis_client.delete(key)
+    try:
+        redis_client.delete(key)
+    except Exception as e:
+        logger.warning(f"对话历史清除失败(已降级, 跳过): user_id={user_id}, 原因: {e}")
