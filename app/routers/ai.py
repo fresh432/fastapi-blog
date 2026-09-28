@@ -40,6 +40,13 @@ def _build_messages(username: str, request: ChatRequest) -> list:
 
     return messages
 
+def _next_or_none(iterator):
+    """
+    在线程内吞掉StopIteration, 返回None作为流结束标记
+    原因: StopIteration跨线程边界回到协程会被PEP 479转成RuntimeError, 无法被except捕获
+    """
+    return next(iterator, None)
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, current_user: User = Depends(get_current_user)):
     """非流式对话接口 (支持历史记录, 自动识别当前登录用户) """
@@ -48,11 +55,14 @@ async def chat(request: ChatRequest, current_user: User = Depends(get_current_us
     messages = _build_messages(current_user.username, request)
 
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
+        # 同步LLM调用(10~30秒)放线程池, 避免阻塞事件循环
+        response = await run_in_threadpool(
+            lambda: client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+            )
         )
 
         content = response.choices[0].message.content
@@ -84,15 +94,25 @@ async def _stream_generator(
     content_parts = []
 
     try:
-        stream = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=True,
+        # 建立流式连接本身是同步阻塞调用, 放线程池避免卡死事件循环
+        stream = await run_in_threadpool(
+            lambda: client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True,
+            )
         )
 
-        for chunk in stream:
+        it = iter(stream)
+        while True:
+
+            # 同步迭代: next()阻塞等LLM吐chunk, 放线程池执行,事件循环可调度其他请求
+            chunk = await run_in_threadpool(_next_or_none, it)
+            if chunk is None:
+                break
+
             if chunk.choices[0].delta.content:
                 part = chunk.choices[0].delta.content
                 content_parts.append(part)
@@ -108,7 +128,7 @@ async def _stream_generator(
         yield f"data: [ERROR] {str(e)}\n\n"
 
 @router.post("/chat/stream")
-async  def chat_stream(request:ChatRequest, current_user: User = Depends(get_current_user)):
+async def chat_stream(request: ChatRequest, current_user: User = Depends(get_current_user)):
     """流式对话接口 (SSE, 支持历史记录, 自动识别当前登录用户) """
     client = get_llm_client()
     model = request.model or settings.LLM_MODEL
@@ -172,15 +192,18 @@ async def summarize_article(request: SummarizeRequest):
     user_prompt = f"标题: {request.title}\n\n正文: {request.content}"
 
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.3,
-            max_tokens=1000,
+        # 同步LLM调用放线程池, 不阻塞事件循环
+        response = await run_in_threadpool(
+            lambda: client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3,
+                max_tokens=1000,
+            )
         )
 
         result = json.loads(response.choices[0].message.content)
@@ -231,6 +254,8 @@ async def upload_document(
     try:
         chunk_count = process_document(file_path)
     except Exception as e:
+        # 处理失败时清理已落盘文件, 避免磁盘残留
+        os.remove(file_path)
         raise HTTPException(status_code=500, detail=f"文档处理失败: {e}")
 
     return {
@@ -248,15 +273,13 @@ async def ask_knowledge(
     基于知识库问答（Hybrid Search），无相关文档时降级为直接LLM回答
     返回结果增加source溯源
     """
-    if not request.messages:
-        raise HTTPException(status_code=400, detail="消息不能为空")
-
+    # 消息非空由Pydantic校验保证(messages必填, 空列表触发422), 无需重复检查
     # 获取用户最后一条问题
     query = request.messages[-1].content
 
     # 混合检索
     try:
-        results =hybrid_search(query, k=3)
+        results = hybrid_search(query, k=3)
     except Exception:
         raise HTTPException(status_code=500, detail="知识库检索失败")
 
@@ -285,14 +308,17 @@ async def ask_knowledge(
     model = request.model or settings.LLM_MODEL
 
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "你是一个知识库问答助手"},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
+        # 同步LLM调用放线程池, 不阻塞事件循环
+        response = await run_in_threadpool(
+            lambda: client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "你是一个知识库问答助手"},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+            )
         )
 
         return ChatResponse(
@@ -389,7 +415,12 @@ async def agent_chat_stream(
         # 深拷贝消息列表, 避免引用赋值意外修改原始状态
         all_messages = copy.deepcopy(list(messages)) # 复制一份用于保存
 
-        for event in graph.stream({"messages": messages}, stream_mode="values"):
+        event_iter = iter(graph.stream({"messages": messages}, stream_mode="values"))
+        while True:
+            event = await run_in_threadpool(_next_or_none, event_iter)
+            if event is None:
+                break
+
             last_msg = event["messages"][-1]
 
             # 工具调用
