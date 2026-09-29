@@ -30,6 +30,9 @@ class Settings(BaseSettings):
 
     SEED_TEST_DATA: bool = False
 
+    # CORS (前后端分离部署的允许源, 逗号分隔, "*"通配时浏览器拒绝携带凭证)
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     class Config:
         env_file = ".env"
         case_sensitive = True
@@ -55,6 +58,11 @@ class Settings(BaseSettings):
         if self.REDIS_PASSWORD:
             return f"redis://:{quote_plus(self.REDIS_PASSWORD)}@{self.REDIS_HOST}:{self.REDIS_PORT}/2"
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/2"
+
+    @property
+    def CORS_ORIGINS_LIST(self) -> list:
+        """CORS允许源列表(逗号分隔字符串 -> list)"""
+        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
     @model_validator(mode='after')
     def check_secret_key(self):

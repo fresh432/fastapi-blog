@@ -10,6 +10,7 @@ FastAPI 博客系统 - 主入口（路由拆分版）
 """
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from app.core.limiter import limiter
@@ -100,6 +101,15 @@ app.include_router(tags.router)
 app.include_router(likes.router)
 app.include_router(ai.router)
 
+# CORS: 前后端分离部署时放行跨域请求 (允许源从配置读取, 生产在.env中修改CORS_ORIGINS)
+# 注意: allow_origins=["*"]通配与allow_credentials=True互斥, 浏览器会拒绝带凭证的通配响应, 故用显式源列表
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS_LIST,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 def read_root():
