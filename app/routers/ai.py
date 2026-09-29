@@ -233,7 +233,14 @@ async def upload_document(
         current_user: User = Depends(get_current_user)
 ):
     """上传文档到知识库 (支持 txt/md, 限制5MB) """
-    # 限制文件类型
+    # 限制文件类型# 限制文件类型 (filename客户端可控: 先判空防500, 再拒绝路径穿越, 最后验扩展名)
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+
+    # 防御路径穿越: 文件名含路径分隔符或..时直接拒绝(存储名虽由服务端生成, 仍按最小信任原则校验)
+    if "/" in file.filename or "\\" in file.filename or ".." in file.filename:
+        raise HTTPException(status_code=400, detail="文件名不合法")
+
     if not file.filename.endswith((".txt", ".md")):
         raise HTTPException(status_code=400, detail="仅支持 .txt 和 .md 文件")
 
@@ -241,6 +248,13 @@ async def upload_document(
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="文件大小超过5MB限制")
+
+    # 内容兜底校验: 知识库按文本处理, 二进制文件改名.txt无法通过UTF-8解码
+    # (扩展名可伪造, 但内容无法伪装成合法文本)
+    try:
+        content.decode("utf-8")
+    except UnicodeError:
+        raise HTTPException(status_code=400, detail="文件内容必须是UTF-8编码的文本")
 
     # 保存文件
     ext = os.path.splitext(file.filename)[1]
