@@ -19,7 +19,7 @@ from app.database import engine, Base
 from contextlib import asynccontextmanager
 
 # 导入路由
-from app.routers import articles, categories, users, comments, tags, likes, ai
+from app.routers import articles, categories, users, comments, tags, likes, ai, favorites
 
 # 建表
 Base.metadata.create_all(bind=engine)
@@ -99,6 +99,7 @@ app.include_router(users.router)
 app.include_router(comments.router)
 app.include_router(tags.router)
 app.include_router(likes.router)
+app.include_router(favorites.router)
 app.include_router(ai.router)
 
 # CORS: 前后端分离部署时放行跨域请求 (允许源从配置读取, 生产在.env中修改CORS_ORIGINS)
