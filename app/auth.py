@@ -14,28 +14,29 @@ SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 
-
-def _truncate_password(password: str) -> bytes:
-    """
-    bcrypt 4.x 限制明文密码最多 72 字节。
-    超过则截断，避免 ValueError: password exceeds maximum length 72
-    """
-    pwd_bytes = password.encode('utf-8')
-    if len(pwd_bytes) > 72:
-        pwd_bytes = pwd_bytes[:72]
-    return pwd_bytes
+# 早期防止密码过长导致错误而使用的密码截断方法
+# 保留原因：bcrypt 72 字节限制的超长密码现在由模型层拦截
+# def _truncate_password(password: str) -> bytes:
+#     """
+#     bcrypt 4.x 限制明文密码最多 72 字节。
+#     超过则截断，避免 ValueError: password exceeds maximum length 72
+#     """
+#     pwd_bytes = password.encode('utf-8')
+#     if len(pwd_bytes) > 72:
+#         pwd_bytes = pwd_bytes[:72]
+#     return pwd_bytes
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """验证明文密码是否匹配加密密码（兼容 bcrypt 4.x）"""
-    pwd_bytes = _truncate_password(plain_password)
+    pwd_bytes = plain_password.encode('utf-8')
     hash_bytes = hashed_password.encode('utf-8')
     return bcrypt.checkpw(pwd_bytes, hash_bytes)
 
 
 def get_password_hash(password: str) -> str:
     """加密密码（兼容 bcrypt 4.x）"""
-    pwd_bytes = _truncate_password(password)
+    pwd_bytes = password.encode('utf-8')
     return bcrypt.hashpw(pwd_bytes, bcrypt.gensalt()).decode('utf-8')
 
 
