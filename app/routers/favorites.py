@@ -105,7 +105,7 @@ def list_favorites(
 ):
     """获取当前用户收藏列表"""
     query = db.query(Article).join(Favorite).filter(Favorite.user_id == current_user.id)
-    articles = query.order_by(Favorite.created_at.desc()).offset(skip).limit(limit).all()
+    articles = query.order_by(Favorite.id.desc()).offset(skip).limit(limit).all()
     total = query.count()
 
     result = {

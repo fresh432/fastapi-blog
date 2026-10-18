@@ -34,7 +34,8 @@ class TestFavoriteIdempotent:
         assert r.status_code == 200
         assert r.json()["favorites_count"] == 0
 
-    def test_unfavorite_default(self, client, auth_headers):
+    def test_unfavorite_with_unfavorited(self, client, auth_headers):
+        """取消收藏未收藏的文章"""
         r = client.post("/favorites/1", headers=auth_headers)
         assert r.status_code == 404
 
@@ -49,6 +50,16 @@ class TestFavoriteIdempotent:
         assert r.status_code == 200
         assert r.json()["favorites_count"] == 1
 
+    def test_favorite_sort_with_favorite_time(self, client, auth_headers):
+        r = client.post("/articles", json={"title": "收藏测试1", "content": "内容"}, headers=auth_headers)
+        article_id1 = r.json()["id"]
+        r = client.post("/articles", json={"title": "收藏测试2", "content": "内容"}, headers=auth_headers)
+        article_id2 = r.json()["id"]
+        client.post(f"/favorites/{article_id1}", headers=auth_headers)
+        client.post(f"/favorites/{article_id2}", headers=auth_headers)
+        r = client.get("/favorites/me", headers=auth_headers)
+        assert r.status_code == 200
+        assert r.json()["articles"][0]["title"] == "收藏测试2"
 
     def test_favorite_unauthorized(self, client):
         """未登录收藏返回401"""
