@@ -86,8 +86,9 @@ def _clear_login_fail(username: str):
 
 # ========== Pydantic 模型 ==========
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
+import re
 
 class UserUpdate(BaseModel):
     avatar: Optional[str] = Field(None, max_length=255, description="头像URL")
@@ -106,6 +107,16 @@ class UserProfile(BaseModel):
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=6, max_length=72)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if re.search(r'[\u4e00-\u9fff]', v):
+            raise ValueError("密码不能包含中文字符")
+        byte_length = len(v.encode('utf-8'))
+        if byte_length > 72:
+            raise ValueError("密码字节长度不能超过72字节")
+        return v
 
 
 class UserResponse(BaseModel):
