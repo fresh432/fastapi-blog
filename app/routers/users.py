@@ -3,15 +3,16 @@
 """
 
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.tasks import send_welcome_email, safe_delay
 from app.database import get_db
 from app.models import User
-from app.auth import verify_password, get_password_hash, create_access_token
+from app.auth import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token, token_hash
 from app.core.dependencies import get_current_user
+from app.core.config import settings
 from app.core.cache import redis_client
 
 import logging
@@ -150,9 +151,56 @@ def login_for_access_token(
         )
 
     _clear_login_fail(form_data.username)
-    access_token = create_access_token(data={"sub": user.username})
+    access_token = create_access_token(data={"sub": user.username, "type": "access"})
+    refresh_token = create_refresh_token(data={"sub": user.username, "type": "refresh"})
+    try:
+        refresh_token_key = token_hash(refresh_token)
+        redis_client.setex(f"refresh_token:{refresh_token_key}", settings.REFRESH_TOKEN_EXPIRE_MINUTES * 60, "1")
+    except Exception as e:
+        logger.warning(f"刷新令牌存储失败(Redis异常, 已跳过): {e}")
+
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
+
+@router.post("/token/refresh")
+def refresh_token(auth_token: str = Header(..., description="Bearer + 刷新令牌, 例如: Bearer eyJhbG..."), db: Session = Depends(get_db)):
+    """使用刷新令牌获取新访问令牌"""
+    token = auth_token.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="刷新令牌为空")
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="刷新令牌无效, 请重新登录")
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="令牌类型错误, 请重新登录")
+    user = db.query(User).filter(User.username == payload["sub"]).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="刷新令牌无效, 请重新登录")
+    try:
+        token_key = token_hash(token)
+        old_value = redis_client.set(f"refresh_token:{token_key}", "used", ex=10, get=True)
+    except Exception as e:
+        logger.warning(f"刷新令牌获取失败(Redis异常, 已跳过): {e}")
+        raise HTTPException(status_code=500, detail="服务器错误, 请重新登录")
+    if old_value != "1":
+        raise HTTPException(status_code=401, detail="刷新令牌无效, 请重新登录")
+
+    access_token = create_access_token(data={"sub": payload["sub"], "type": "access"})
+    new_refresh_token = create_refresh_token(data={"sub": payload["sub"], "type": "refresh"})
+
+    try:
+        new_refresh_token_key = token_hash(new_refresh_token)
+        redis_client.setex(f"refresh_token:{new_refresh_token_key}", settings.REFRESH_TOKEN_EXPIRE_MINUTES * 60, "1")
+    except Exception as e:
+        logger.warning(f"刷新令牌存储失败: {e}")
+        raise HTTPException(status_code=500, detail="服务器错误, 请重新登录")
+
+    return {
+        "access_token": access_token,
+        "refresh_token": new_refresh_token,
         "token_type": "bearer"
     }
 
@@ -189,13 +237,38 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     _clear_login_fail(user.username)
-    access_token = create_access_token(data={"sub": db_user.username})
+    access_token = create_access_token(data={"sub": db_user.username, "type": "access"})
+    refresh_token = create_refresh_token(data={"sub": db_user.username, "type": "refresh"})
+    try:
+        refresh_token_key = token_hash(refresh_token)
+        redis_client.setex(f"refresh_token:{refresh_token_key}", settings.REFRESH_TOKEN_EXPIRE_MINUTES * 60, "1")
+    except Exception as e:
+        logger.warning(f"刷新令牌存储失败(Redis异常, 已跳过): {e}")
+
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "user_id": db_user.id,
         "token_type": "bearer"
     }
 
+@router.post("/logout")
+def logout(auth_token: str = Header(..., description="Bearer + 刷新令牌, 例如: Bearer eyJhbG...")):
+    token = auth_token.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="刷新令牌为空")
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="刷新令牌无效, 登出失败")
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="令牌类型错误, 登出失败")
+    try:
+        token_key = token_hash(token)
+        redis_client.delete(f"refresh_token:{token_key}")
+    except Exception as e:
+        logger.warning(f"刷新令牌删除失败(Redis异常, 已跳过): {e}")
+        raise HTTPException(status_code=500, detail="登出失败, 服务端会话清除失败, 本地令牌将在短时间内自动失效")
+    return {"detail": "登出成功"}
 
 @router.get("/users/me", response_model=UserProfile)
 def read_users_me(current_user: User = Depends(get_current_user)):

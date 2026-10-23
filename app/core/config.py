@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     # JWT (原 auth.py 中的配置)
     SECRET_KEY: str = "your-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
 
     # LLM (新增)
     LLM_API_KEY: str = ""
