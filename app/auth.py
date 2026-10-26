@@ -5,6 +5,7 @@
 import bcrypt
 import jwt
 import hashlib
+import uuid
 from datetime import datetime, timedelta, timezone
 from jwt.exceptions import InvalidTokenError
 
@@ -55,6 +56,7 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
 def create_refresh_token(data: dict, expires_delta: timedelta = None):
     """创建JWT Refresh Token"""
     to_encode = data.copy()
+    to_encode.update({"jti": str(uuid.uuid4().hex)})
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
