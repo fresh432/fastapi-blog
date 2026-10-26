@@ -14,11 +14,34 @@ SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+_redis_store = {}
+
 @pytest.fixture(autouse=True)
 def mock_cache_redis(monkeypatch):
     """全局 mock Redis：patch 实例方法, 对所有 import 方式生效"""
     mock = MagicMock()
-    mock.get.return_value = None
+
+    def mock_cache_set(key, value, *args, **kwargs):
+        old_value = _redis_store.get(key, None)
+        _redis_store[key] = value
+        if kwargs.get("get"):
+            return old_value
+        return True
+
+    def mock_cache_get(key, *args, **kwargs):
+        return _redis_store.get(key, None)
+
+    def mock_cache_delete(key, *args, **kwargs):
+        _redis_store.pop(key, None)
+
+    def mock_cache_setex(key, expire, value, *args, **kwargs):
+        _redis_store[key] = value
+
+    mock.get.side_effect = mock_cache_get
+    mock.set.side_effect = mock_cache_set
+    mock.delete.side_effect = mock_cache_delete
+    mock.setex.side_effect = mock_cache_setex
+
     mock.scan_iter.return_value = iter([])
     monkeypatch.setattr(redis_client, "ping", mock.ping)
     monkeypatch.setattr(redis_client, "get", mock.get)
