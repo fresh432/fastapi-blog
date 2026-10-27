@@ -3,7 +3,7 @@
 """
 
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 
@@ -14,6 +14,7 @@ from app.auth import verify_password, get_password_hash, create_access_token, cr
 from app.core.dependencies import get_current_user
 from app.core.config import settings
 from app.core.cache import redis_client
+from app.core.limiter import limiter
 
 import logging
 import time
@@ -166,7 +167,12 @@ def login_for_access_token(
     }
 
 @router.post("/token/refresh")
-def refresh_token(auth_token: str = Header(..., description="Bearer + 刷新令牌, 例如: Bearer eyJhbG..."), db: Session = Depends(get_db)):
+@limiter.limit("100/minute")
+def refresh_token(
+        request: Request,
+        auth_token: str = Header(..., description="Bearer + 刷新令牌, 例如: Bearer eyJhbG..."),
+        db: Session = Depends(get_db)
+):
     """使用刷新令牌获取新访问令牌"""
     token = auth_token.removeprefix("Bearer ").strip()
     if not token:
