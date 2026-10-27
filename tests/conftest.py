@@ -19,6 +19,7 @@ _redis_store = {}
 @pytest.fixture(autouse=True)
 def mock_cache_redis(monkeypatch):
     """全局 mock Redis：patch 实例方法, 对所有 import 方式生效"""
+    _redis_store.clear()
     mock = MagicMock()
 
     def mock_cache_set(key, value, *args, **kwargs):
