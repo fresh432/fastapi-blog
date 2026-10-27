@@ -19,7 +19,7 @@
 
 | 模块   | 功能                               |
 |------|----------------------------------|
-| 用户   | 注册 / 登录 / JWT 认证 / 获取资料 / 更新资料   |
+| 用户   | 注册 / 登录 / 双令牌认证(access+refresh) / 获取资料 / 更新资料   |
 | 文章   | CRUD / 搜索 / 分页 / 草稿状态 / Redis 缓存 |
 | 分类   | CRUD / 文章关联 / 删除置 NULL           |
 | 评论   | 创建 / 列表 / 分页 / 级联删除              |
@@ -179,31 +179,47 @@ fastapi-blog/
 Authorization: Bearer {access_token}
 ```
 
+### 双令牌机制
+
+- **access token**：15 分钟有效期，访问受保护接口时携带（Header: `Authorization: Bearer {access_token}`）
+- **refresh token**：7 天有效期，用于换新令牌（Header: `auth-token: Bearer {refresh_token}`）
+- 刷新时旧 refresh token 保留10秒后作废（原子占位，保留10秒是为后续做重放检测预留的窗口），并发刷新失败由前端重试兜底
+- Redis 故障时：登录/访问不受影响（access 无状态），刷新/登出受控报错引导重新登录
+
 ### 核心接口速查
 
-| 模块 | 接口 | 方法 | 说明 |
-|------|------|------|------|
-| 用户 | `/register` | POST | 用户注册 |
-| 用户 | `/login` | POST | JSON 登录 |
-| 用户 | `/token` | POST | OAuth2 登录（Swagger 用） |
-| 文章 | `/articles` | GET | 文章列表（支持缓存） |
-| 文章 | `/articles` | POST | 创建文章（需登录） |
-| 文章 | `/articles/{id}` | PUT | 更新文章（仅作者） |
-| 文章 | `/articles/{id}` | DELETE | 删除文章（仅作者） |
-| AI | `/ai/chat` | POST | LLM 对话（需登录） |
-| AI | `/ai/chat/stream` | POST | SSE 流式对话（需登录） |
-| AI | `/ai/upload` | POST | 上传文档到知识库 |
-| AI | `/ai/ask` | POST | 知识库问答（需登录） |
-| AI | `/ai/agent` | POST | Agent 智能体对话（需登录） |
-| AI | `/ai/agent/stream` | POST | Agent 流式对话（需登录） |
+| 模块 | 接口                 | 方法     | 说明                        |
+|----|--------------------|--------|---------------------------|
+| 用户 | `/register`        | POST   | 用户注册                      |
+| 用户 | `/login`           | POST   | JSON 登录                   |
+| 用户 | `/token`           | POST   | OAuth2 登录（Swagger 用）      |
+| 用户 | `/logout`          | POST   | 登出（作废 refresh token）      |
+| 用户 | `/token/refresh`   | POST   | 刷新令牌（Header 传 auth-token） |
+| 文章 | `/articles`        | GET    | 文章列表（支持缓存）                |
+| 文章 | `/articles`        | POST   | 创建文章（需登录）                 |
+| 文章 | `/articles/{id}`   | PUT    | 更新文章（仅作者）                 |
+| 文章 | `/articles/{id}`   | DELETE | 删除文章（仅作者）                 |
+| AI | `/ai/chat`         | POST   | LLM 对话（需登录）               |
+| AI | `/ai/chat/stream`  | POST   | SSE 流式对话（需登录）             |
+| AI | `/ai/upload`       | POST   | 上传文档到知识库                  |
+| AI | `/ai/ask`          | POST   | 知识库问答（需登录）                |
+| AI | `/ai/agent`        | POST   | Agent 智能体对话（需登录）          |
+| AI | `/ai/agent/stream` | POST   | Agent 流式对话（需登录）           |
 
-## 接口测试报告
+## 接口测试报告（初版，后续接口见接口速查表）
 
 详见 `docs/api_test_report.md`，包含：
 - 33 个接口全量测试结果（全部通过）
 - 5 个 bug 发现与修复记录
 - 权限安全验证
 - 性能与缓存验证
+
+### 性能基线（wrk: 4线程 / 100连接 / 30s）
+
+| 接口 | 场景 | QPS | 平均延迟 | p99 |
+|------|------|-----|---------|-----|
+| GET /articles | 缓存命中 | 769 | 130ms | 281ms |
+| GET /articles | 缓存未命中(回源MySQL) | 205 | 488ms | 1.28s |
 
 ## 生产部署架构
 ```plain
@@ -372,7 +388,7 @@ alembic upgrade head
 ## 部署注意事项
 
 1. **MySQL 密码特殊字符**：如密码含 `@` 等特殊字符，`database.py` 已使用 `quote_plus` 进行 URL 编码
-2. **bcrypt 4.x 兼容**：`auth.py` 使用原生 bcrypt 并截断 72 字节，避免 `passlib` 兼容问题
+2. **bcrypt 4.x 兼容**：`auth.py` 使用原生 bcrypt（避免 passlib 兼容问题）；密码长度由模型层校验（按字节 ≤72、拦截中文密码）
 3. **Chroma 持久化**：Docker 部署时需挂载 `chroma_db` 目录，确保向量数据不丢失
 4. **LLM API Key**：AI 模块依赖外部 LLM 服务，请确保 `.env` 中配置有效 Key
 5. **Nginx Keep-Alive**：生产环境通过 Nginx 反向代理管理长连接，配置 `keepalive_timeout` 和 `keepalive_requests` 防止空闲连接占用资源
@@ -394,6 +410,8 @@ alembic upgrade head
 5. **【异步】Celery 发布快速失败依赖组合配置**：`broker_connection_timeout=2` + `broker_connection_max_retries=1` + `task_publish_retry=False`（另有 transport socket 超时 2s）共同保证 Redis 故障时发布 2 秒内快速失败。注意 `broker_connection_max_retries=0` 语义是**无限重试**而非不重试；`broker_publish_retry` 是无效配置项会被静默忽略——改动任一项即退回 kombu 默认递增长重试（阻塞数分钟）。
 
 6. **【数据】测试数据仅显式开关注入**：仅 `SEED_TEST_DATA=true` 且文章表为空时注入测试数据，生产默认空表。全新部署无初始数据属预期行为，演示/联调需显式开启。
+
+7. **【认证】refresh token 作废标记保留 10 秒，并发刷新需前端重试**：刷新成功时旧 token 的值被原子改写为 "used" 而非立即删除（TTL 保留 10 秒）——该窗口既缓冲并发刷新的竞争，也为后续"重放检测"预留识别能力（旧 token 在作废后再现即可判定可疑）；同一 refresh token 并发双请求必有一个 401，由前端重试兜底。
 
 ## 许可证
 
